@@ -1,0 +1,23 @@
+kind = "mobile"
+previewPath = "/"
+title = "DeviceLock - Control de Crédito"
+version = "1.0.0"
+id = "artifacts/device-lock"
+router = "expo-domain"
+
+[[services]]
+name = "expo"
+ensurePreviewReachable = "/status"
+paths = [ "/" ]
+localPort = 20447
+
+[services.development]
+run = "pnpm --filter @workspace/device-lock run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/device-lock", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/device-lock", "run", "serve" ]
+
+[services.env]
+PORT = "20447"
+BASE_PATH = "/"
