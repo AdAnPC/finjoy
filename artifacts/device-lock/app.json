@@ -16,7 +16,9 @@
     "ios": {
       "supportsTablet": false
     },
-    "android": {},
+    "android": {
+      "package": "com.finjoy.devicelock"
+    },
     "web": {
       "favicon": "./assets/images/icon.png"
     },
@@ -28,7 +30,8 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "./app.plugin.js"
     ],
     "experiments": {
       "typedRoutes": true,
