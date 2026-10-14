@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
 import { Alert, AppState, Platform } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
+import * as SecureStore from 'expo-secure-store';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -8,6 +10,8 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { LockScreen } from '@/components/LockScreen';
 import { PaymentModal } from '@/components/PaymentModal';
 import { LoanProvider, useLoan } from '@/context/LoanContext';
+import { API_BASE_URL } from '@/lib/api-config';
+import { CustomerAccessScreen } from '@/components/CustomerAccessScreen';
 import { useDeviceAdmin } from '@/hooks/useDeviceAdmin';
 import {
   Inter_400Regular,
@@ -22,6 +26,10 @@ import * as SplashScreen from 'expo-splash-screen';
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
+const CUSTOMER_SESSION_KEY = 'finjoy.customer.session';
+
+setBaseUrl(API_BASE_URL);
+setAuthTokenGetter(() => SecureStore.getItemAsync(CUSTOMER_SESSION_KEY));
 
 function AdminGuard() {
   const { isSupported, isActive, isChecking, requestAdmin } = useDeviceAdmin();
@@ -54,7 +62,37 @@ function AdminGuard() {
 }
 
 function RootLayoutNav() {
-  const { isDeviceLocked } = useLoan();
+  const {
+    isDeviceLocked,
+    isLoading,
+    isAuthenticated,
+    hasSession,
+    apiConfigured,
+    syncError,
+    refreshAccount,
+    logout,
+  } = useLoan();
+
+  if (isLoading) {
+    return (
+      <GestureHandlerRootView style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <Text>Conectando con FinJoy…</Text>
+      </GestureHandlerRootView>
+    );
+  }
+  if (!apiConfigured || !hasSession || !isAuthenticated) {
+    return <CustomerAccessScreen />;
+  }
+  if (syncError) {
+    return (
+      <CustomerAccessScreen
+        syncError={syncError}
+        onRetry={refreshAccount}
+        onLogout={logout}
+      />
+    );
+  }
+
   return (
     <>
       <Stack screenOptions={{ headerShown: false }}>

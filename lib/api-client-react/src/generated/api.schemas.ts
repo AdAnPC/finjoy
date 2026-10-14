@@ -5,6 +5,119 @@
  * FinJoy Admin API — gestión de clientes, préstamos y pagos
  * OpenAPI spec version: 0.1.0
  */
+export interface AdminAuthStatus {
+  required: boolean;
+  configured: boolean;
+}
+
+export interface AdminAuthVerification {
+  valid: boolean;
+}
+
+export interface CustomerActivationRequest {
+  /**
+     * @minLength 8
+     * @maxLength 16
+     */
+  code: string;
+  /**
+     * @minLength 10
+     * @maxLength 128
+     */
+  password: string;
+}
+
+export interface CustomerLoginRequest {
+  /**
+     * @minLength 5
+     * @maxLength 32
+     */
+  phone: string;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
+  password: string;
+}
+
+export interface CustomerSession {
+  token: string;
+  expiresAt: string;
+}
+
+export interface IssueActivationCodeRequest {
+  confirmReset: boolean;
+}
+
+export interface ClientActivationCode {
+  code: string;
+  expiresAt: string;
+}
+
+export type CustomerAccountClient = {
+  id: number;
+  name: string;
+  phone: string;
+};
+
+export type CustomerLoanStatus = typeof CustomerLoanStatus[keyof typeof CustomerLoanStatus];
+
+
+export const CustomerLoanStatus = {
+  active: 'active',
+  due_soon: 'due_soon',
+  overdue: 'overdue',
+  locked: 'locked',
+  completed: 'completed',
+} as const;
+
+export interface CustomerLoan {
+  id: number;
+  totalAmount: number;
+  paidAmount: number;
+  monthlyPayment: number;
+  nextDueDate: string;
+  status: CustomerLoanStatus;
+  deviceModel: string;
+  startDate: string;
+  totalMonths: number;
+  paidMonths: number;
+  gracePeriodDays: number;
+}
+
+export type CustomerPaymentMethod = typeof CustomerPaymentMethod[keyof typeof CustomerPaymentMethod];
+
+
+export const CustomerPaymentMethod = {
+  cash: 'cash',
+  transfer: 'transfer',
+  card: 'card',
+} as const;
+
+export type CustomerPaymentStatus = typeof CustomerPaymentStatus[keyof typeof CustomerPaymentStatus];
+
+
+export const CustomerPaymentStatus = {
+  completed: 'completed',
+  pending: 'pending',
+  failed: 'failed',
+} as const;
+
+export interface CustomerPayment {
+  id: number;
+  amount: number;
+  date: string;
+  method: CustomerPaymentMethod;
+  reference: string;
+  status: CustomerPaymentStatus;
+}
+
+export interface CustomerAccount {
+  client: CustomerAccountClient;
+  loan: CustomerLoan | null;
+  payments: CustomerPayment[];
+}
+
 export interface HealthStatus {
   status: string;
 }

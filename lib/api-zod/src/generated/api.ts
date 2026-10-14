@@ -17,6 +17,105 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * @summary Check whether the admin API requires a key
+ */
+export const GetAdminAuthStatusResponse = zod.object({
+  "required": zod.boolean(),
+  "configured": zod.boolean()
+})
+
+
+/**
+ * @summary Verify the configured admin API key
+ */
+export const VerifyAdminAccessResponse = zod.object({
+  "valid": zod.boolean()
+})
+
+
+/**
+ * @summary Redeem a one-time activation code and set a password
+ */
+export const activateCustomerAccountBodyCodeMin = 8;
+export const activateCustomerAccountBodyCodeMax = 16;
+
+export const activateCustomerAccountBodyPasswordMin = 10;
+export const activateCustomerAccountBodyPasswordMax = 128;
+
+
+
+export const ActivateCustomerAccountBody = zod.object({
+  "code": zod.string().min(activateCustomerAccountBodyCodeMin).max(activateCustomerAccountBodyCodeMax),
+  "password": zod.string().min(activateCustomerAccountBodyPasswordMin).max(activateCustomerAccountBodyPasswordMax)
+})
+
+export const ActivateCustomerAccountResponse = zod.object({
+  "token": zod.string(),
+  "expiresAt": zod.string()
+})
+
+
+/**
+ * @summary Start a customer session using phone and password
+ */
+export const loginCustomerBodyPhoneMin = 5;
+export const loginCustomerBodyPhoneMax = 32;
+
+export const loginCustomerBodyPasswordMax = 128;
+
+
+
+export const LoginCustomerBody = zod.object({
+  "phone": zod.string().min(loginCustomerBodyPhoneMin).max(loginCustomerBodyPhoneMax),
+  "password": zod.string().min(1).max(loginCustomerBodyPasswordMax)
+})
+
+export const LoginCustomerResponse = zod.object({
+  "token": zod.string(),
+  "expiresAt": zod.string()
+})
+
+
+/**
+ * @summary Revoke the current customer session
+ */
+export const LogoutCustomerResponse = zod.void()
+
+
+/**
+ * @summary Get the authenticated customer's credit and payment history
+ */
+export const GetCustomerAccountResponse = zod.object({
+  "client": zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "phone": zod.string()
+}),
+  "loan": zod.union([zod.object({
+  "id": zod.number(),
+  "totalAmount": zod.number(),
+  "paidAmount": zod.number(),
+  "monthlyPayment": zod.number(),
+  "nextDueDate": zod.string(),
+  "status": zod.enum(['active', 'due_soon', 'overdue', 'locked', 'completed']),
+  "deviceModel": zod.string(),
+  "startDate": zod.string(),
+  "totalMonths": zod.number(),
+  "paidMonths": zod.number(),
+  "gracePeriodDays": zod.number()
+}),zod.null()]),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "amount": zod.number(),
+  "date": zod.string(),
+  "method": zod.enum(['cash', 'transfer', 'card']),
+  "reference": zod.string(),
+  "status": zod.enum(['completed', 'pending', 'failed'])
+}))
+})
+
+
+/**
  * @summary Summary stats for the admin dashboard
  */
 export const GetDashboardResponse = zod.object({
@@ -379,6 +478,25 @@ export const DeleteClientParams = zod.object({
 })
 
 export const DeleteClientResponse = zod.void()
+
+
+/**
+ * @summary Issue a one-time activation code for a client account
+ */
+export const IssueClientActivationCodeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const issueClientActivationCodeBodyConfirmResetDefault = false;
+
+export const IssueClientActivationCodeBody = zod.object({
+  "confirmReset": zod.boolean().default(issueClientActivationCodeBodyConfirmResetDefault)
+})
+
+export const IssueClientActivationCodeResponse = zod.object({
+  "code": zod.string(),
+  "expiresAt": zod.string()
+})
 
 
 /**

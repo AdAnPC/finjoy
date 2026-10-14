@@ -26,7 +26,8 @@
       "expo-router",
       "expo-font",
       "expo-web-browser",
-      "./app.plugin.js"
+      "./app.plugin.js",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

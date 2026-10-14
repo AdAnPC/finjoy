@@ -20,6 +20,12 @@ tags:
     description: Payment management
   - name: apk
     description: APK versioning and distribution
+  - name: customerAuth
+    description: Customer account activation and login
+  - name: customer
+    description: Authenticated customer credit and payment data
+  - name: adminAuth
+    description: Admin API key verification
 
 paths:
   /healthz:
@@ -34,6 +40,122 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /admin/auth/status:
+    get:
+      operationId: getAdminAuthStatus
+      tags: [adminAuth]
+      summary: Check whether the admin API requires a key
+      responses:
+        "200":
+          description: Admin API access configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAuthStatus"
+
+  /admin/auth/verify:
+    post:
+      operationId: verifyAdminAccess
+      tags: [adminAuth]
+      summary: Verify the configured admin API key
+      security:
+        - AdminApiKey: []
+      responses:
+        "200":
+          description: The admin key is valid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAuthVerification"
+        "401":
+          description: The admin key is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /customer/auth/activate:
+    post:
+      operationId: activateCustomerAccount
+      tags: [customerAuth]
+      summary: Redeem a one-time activation code and set a password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerActivationRequest"
+      responses:
+        "200":
+          description: Customer account activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerSession"
+        "400":
+          description: Invalid or expired activation code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /customer/auth/login:
+    post:
+      operationId: loginCustomer
+      tags: [customerAuth]
+      summary: Start a customer session using phone and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerLoginRequest"
+      responses:
+        "200":
+          description: Customer session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerSession"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /customer/auth/logout:
+    post:
+      operationId: logoutCustomer
+      tags: [customerAuth]
+      security:
+        - CustomerBearer: []
+      summary: Revoke the current customer session
+      responses:
+        "204":
+          description: Customer session revoked
+
+  /customer/account:
+    get:
+      operationId: getCustomerAccount
+      tags: [customer]
+      security:
+        - CustomerBearer: []
+      summary: Get the authenticated customer's credit and payment history
+      responses:
+        "200":
+          description: Customer account data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerAccount"
+        "401":
+          description: Session is missing or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   # ── Dashboard ────────────────────────────────────────────────────────────────
   /admin/dashboard:
@@ -298,6 +420,39 @@ paths:
         "204":
           description: Deleted
 
+  /admin/clients/{id}/activation-code:
+    post:
+      operationId: issueClientActivationCode
+      tags: [clients]
+      security:
+        - AdminApiKey: []
+      summary: Issue a one-time activation code for a client account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueActivationCodeRequest"
+      responses:
+        "200":
+          description: One-time activation code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientActivationCode"
+        "404":
+          description: Client not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ── Loans ────────────────────────────────────────────────────────────────────
   /admin/loans:
     get:
@@ -516,7 +671,152 @@ paths:
           description: Deleted
 
 components:
+  securitySchemes:
+    CustomerBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+    AdminApiKey:
+      type: http
+      scheme: bearer
   schemas:
+    AdminAuthStatus:
+      type: object
+      properties:
+        required:
+          type: boolean
+        configured:
+          type: boolean
+      required: [required, configured]
+
+    AdminAuthVerification:
+      type: object
+      properties:
+        valid:
+          type: boolean
+      required: [valid]
+
+    CustomerActivationRequest:
+      type: object
+      properties:
+        code:
+          type: string
+          minLength: 8
+          maxLength: 16
+        password:
+          type: string
+          minLength: 10
+          maxLength: 128
+      required: [code, password]
+
+    CustomerLoginRequest:
+      type: object
+      properties:
+        phone:
+          type: string
+          minLength: 5
+          maxLength: 32
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+      required: [phone, password]
+
+    CustomerSession:
+      type: object
+      properties:
+        token:
+          type: string
+        expiresAt:
+          type: string
+      required: [token, expiresAt]
+
+    IssueActivationCodeRequest:
+      type: object
+      properties:
+        confirmReset:
+          type: boolean
+          default: false
+      required: [confirmReset]
+
+    ClientActivationCode:
+      type: object
+      properties:
+        code:
+          type: string
+        expiresAt:
+          type: string
+      required: [code, expiresAt]
+
+    CustomerAccount:
+      type: object
+      properties:
+        client:
+          type: object
+          properties:
+            id:
+              type: number
+            name:
+              type: string
+            phone:
+              type: string
+          required: [id, name, phone]
+        loan:
+          oneOf:
+            - $ref: "#/components/schemas/CustomerLoan"
+            - type: "null"
+        payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomerPayment"
+      required: [client, loan, payments]
+
+    CustomerLoan:
+      type: object
+      properties:
+        id:
+          type: number
+        totalAmount:
+          type: number
+        paidAmount:
+          type: number
+        monthlyPayment:
+          type: number
+        nextDueDate:
+          type: string
+        status:
+          type: string
+          enum: [active, due_soon, overdue, locked, completed]
+        deviceModel:
+          type: string
+        startDate:
+          type: string
+        totalMonths:
+          type: number
+        paidMonths:
+          type: number
+        gracePeriodDays:
+          type: number
+      required: [id, totalAmount, paidAmount, monthlyPayment, nextDueDate, status, deviceModel, startDate, totalMonths, paidMonths, gracePeriodDays]
+
+    CustomerPayment:
+      type: object
+      properties:
+        id:
+          type: number
+        amount:
+          type: number
+        date:
+          type: string
+        method:
+          type: string
+          enum: [cash, transfer, card]
+        reference:
+          type: string
+        status:
+          type: string
+          enum: [completed, pending, failed]
+      required: [id, amount, date, method, reference, status]
     HealthStatus:
       type: object
       properties:
