@@ -20,6 +20,15 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 const basePath = process.env.BASE_PATH;
+const localApiProxy =
+  process.env.LOCAL_API_PROXY === 'true'
+    ? {
+        '/api': {
+          target: process.env.LOCAL_API_TARGET || 'http://127.0.0.1:8080',
+          changeOrigin: true,
+        },
+      }
+    : undefined;
 
 if (!basePath) {
   throw new Error(
@@ -69,6 +78,7 @@ export default defineConfig({
     strictPort: true,
     host: '0.0.0.0',
     allowedHosts: true,
+    proxy: localApiProxy,
     fs: {
       strict: true,
     },

@@ -32,6 +32,9 @@ node_modules
 /connect.lock
 /coverage
 /generated-apk/
+.env
+.env.*
+!.env.example
 /libpeerconnection.log
 npm-debug.log
 yarn-error.log

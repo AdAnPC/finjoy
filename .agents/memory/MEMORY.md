@@ -1,1 +1,2 @@
 - [App Storage provisioning](app-storage-provisioning.md) — a transient internal provisioning failure may resolve on an idempotent retry; budget errors must be handled separately.
+- [Local downloads and deployment](local-download-deployment.md) — user wants the full FinJoy project downloadable and PC-runnable for self-managed production publishing; hosting is undecided.
