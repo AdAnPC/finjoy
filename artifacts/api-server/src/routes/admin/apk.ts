@@ -2,10 +2,13 @@ import { createHash } from "node:crypto";
 import { Router, type IRouter } from "express";
 import { asc, desc, eq } from "drizzle-orm";
 import { db, apkVersionsTable } from "@workspace/db";
-import { ObjectNotFoundError, ObjectStorageService } from "../../lib/objectStorage";
+import {
+  getApkStorageProvider,
+  ObjectNotFoundError,
+  ObjectStorageConfigurationError,
+} from "../../lib/apkStorage";
 
 const router: IRouter = Router();
-const objectStorageService = new ObjectStorageService();
 const MAX_APK_BYTES = 100 * 1024 * 1024;
 const APK_CONTENT_TYPES = new Set([
   "application/vnd.android.package-archive",
@@ -85,8 +88,9 @@ router.get("/admin/apk/download", async (req, res): Promise<void> => {
       res.status(404).json({ error: "No APK has been published yet" });
       return;
     }
-    const file = await objectStorageService.getObjectEntityFile(active.objectPath);
-    const response = await objectStorageService.downloadObject(file);
+    const storage = getApkStorageProvider();
+    const file = await storage.getObjectEntityFile(active.objectPath);
+    const response = await storage.downloadObject(file);
     res.status(response.status);
     response.headers.forEach((value, key) => res.setHeader(key, value));
     if (response.body) {
@@ -103,6 +107,10 @@ router.get("/admin/apk/download", async (req, res): Promise<void> => {
       res.status(404).json({ error: "The published APK object no longer exists" });
       return;
     }
+    if (error instanceof ObjectStorageConfigurationError) {
+      res.status(503).json({ error: "El almacenamiento de APK no está configurado" });
+      return;
+    }
     res.status(500).json({ error: "No se pudo descargar la APK" });
   }
 });
@@ -113,14 +121,14 @@ router.post("/admin/apk/upload-url", async (req, res): Promise<void> => {
     return;
   }
   try {
-    const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-    res.json({
-      uploadURL,
-      objectPath: objectStorageService.normalizeObjectEntityPath(uploadURL),
-      version: req.body.version,
-    });
+    const uploadTarget = await getApkStorageProvider().createUploadTarget();
+    res.json({ ...uploadTarget, version: req.body.version });
   } catch (error) {
     req.log.error({ err: error }, "Failed to create APK upload URL");
+    if (error instanceof ObjectStorageConfigurationError) {
+      res.status(503).json({ error: "El almacenamiento de APK no está configurado" });
+      return;
+    }
     res.status(500).json({ error: "No se pudo preparar la subida" });
   }
 });
@@ -148,7 +156,7 @@ router.post("/admin/apk/versions", async (req, res): Promise<void> => {
       return;
     }
 
-    const file = await objectStorageService.getObjectEntityFile(objectPath);
+    const file = await getApkStorageProvider().getObjectEntityFile(objectPath);
     const [metadata] = await file.getMetadata();
     const actualSize = Number(metadata.size ?? 0);
     const actualType = String(metadata.contentType ?? "");
@@ -190,6 +198,10 @@ router.post("/admin/apk/versions", async (req, res): Promise<void> => {
       res.status(404).json({ error: "La APK subida no existe o expiró" });
       return;
     }
+    if (error instanceof ObjectStorageConfigurationError) {
+      res.status(503).json({ error: "El almacenamiento de APK no está configurado" });
+      return;
+    }
     res.status(500).json({ error: "No se pudo validar la APK" });
   }
 });
@@ -211,7 +223,7 @@ router.post("/admin/apk/versions/:id/activate", async (req, res): Promise<void> 
       if (!selected) return null;
       if (selected.status !== "pending") return { invalidState: true };
 
-      await objectStorageService.getObjectEntityFile(selected.objectPath);
+      await getApkStorageProvider().getObjectEntityFile(selected.objectPath);
       await tx
         .update(apkVersionsTable)
         .set({ status: "archived" })
@@ -236,6 +248,10 @@ router.post("/admin/apk/versions/:id/activate", async (req, res): Promise<void> 
     req.log.error({ err: error }, "Failed to activate APK version");
     if (error instanceof ObjectNotFoundError) {
       res.status(409).json({ error: "La APK de esta versión ya no existe en almacenamiento" });
+      return;
+    }
+    if (error instanceof ObjectStorageConfigurationError) {
+      res.status(503).json({ error: "El almacenamiento de APK no está configurado" });
       return;
     }
     res.status(500).json({ error: "No se pudo activar la versión" });

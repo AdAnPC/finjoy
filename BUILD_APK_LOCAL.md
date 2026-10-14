@@ -20,6 +20,8 @@ El asistente instala las dependencias, genera el proyecto Android de Expo si tod
 
 Copia `generated-apk/FinJoy-debug.apk` al teléfono y ábrelo. Android puede pedir permiso para instalar aplicaciones desde esa fuente y solicitar que FinJoy se active como Administrador del dispositivo. La APK no se instala silenciosamente.
 
+La APK contiene el código y los recursos de la app; no necesita Expo Go, Metro ni un dominio de Replit para arrancar. Las funciones actuales y los datos de crédito funcionan en el dispositivo y se guardan localmente. No hay sincronización con el panel/API todavía.
+
 ## Notas importantes
 
 - La primera versión generada es una **APK debug**, firmada automáticamente con la clave de depuración local de Android. Sirve para instalar y probar la app; no es una compilación firmada para publicación comercial.
