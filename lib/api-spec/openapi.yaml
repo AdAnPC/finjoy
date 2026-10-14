@@ -3,20 +3,30 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: FinJoy Admin API — gestión de clientes, préstamos y pagos
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: dashboard
+    description: Dashboard summary
+  - name: clients
+    description: Client management
+  - name: loans
+    description: Loan management
+  - name: payments
+    description: Payment management
+  - name: apk
+    description: APK versioning and distribution
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +34,487 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ── Dashboard ────────────────────────────────────────────────────────────────
+  /admin/dashboard:
+    get:
+      operationId: getDashboard
+      tags: [dashboard]
+      summary: Summary stats for the admin dashboard
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /admin/dashboard/recent-payments:
+    get:
+      operationId: getRecentPayments
+      tags: [dashboard]
+      summary: Last 10 payments across all loans
+      responses:
+        "200":
+          description: Recent payments list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PaymentWithClient"
+
+  /admin/dashboard/overdue-loans:
+    get:
+      operationId: getOverdueLoans
+      tags: [dashboard]
+      summary: All loans that are overdue or locked
+      responses:
+        "200":
+          description: Overdue/locked loans
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LoanWithClient"
+
+  # ── APK distribution ────────────────────────────────────────────────────────
+  /admin/apk:
+    get:
+      operationId: getApkDistribution
+      tags: [apk]
+      summary: Get the active APK and version history
+      responses:
+        "200":
+          description: APK distribution state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApkDistribution"
+
+  /admin/apk/download:
+    get:
+      operationId: downloadActiveApk
+      tags: [apk]
+      summary: Download the active APK from the stable URL
+      responses:
+        "200":
+          description: Active APK binary
+          content:
+            application/vnd.android.package-archive:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: No active APK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/apk/upload-url:
+    post:
+      operationId: requestApkUploadUrl
+      tags: [apk]
+      summary: Request a presigned URL for an APK upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApkUploadRequest"
+      responses:
+        "200":
+          description: Presigned upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApkUploadUrl"
+        "400":
+          description: Invalid APK metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/apk/versions:
+    post:
+      operationId: registerApkVersion
+      tags: [apk]
+      summary: Validate and register an uploaded APK as pending
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterApkVersionRequest"
+      responses:
+        "201":
+          description: APK validated and registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApkVersion"
+        "400":
+          description: APK validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/apk/versions/{id}/activate:
+    post:
+      operationId: activateApkVersion
+      tags: [apk]
+      summary: Activate a validated pending APK version
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Updated APK distribution state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApkDistribution"
+        "409":
+          description: Version cannot be activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Clients ──────────────────────────────────────────────────────────────────
+  /admin/clients:
+    get:
+      operationId: listClients
+      tags: [clients]
+      summary: List all clients with their active loan status
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, due_soon, overdue, locked, completed, all]
+      responses:
+        "200":
+          description: Clients list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClientWithLoan"
+    post:
+      operationId: createClient
+      tags: [clients]
+      summary: Create a new client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientInput"
+      responses:
+        "201":
+          description: Created client
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+
+  /admin/clients/{id}:
+    get:
+      operationId: getClient
+      tags: [clients]
+      summary: Get a client with their loan and payment history
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Client detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateClient
+      tags: [clients]
+      summary: Update client info
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientUpdate"
+      responses:
+        "200":
+          description: Updated client
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteClient
+      tags: [clients]
+      summary: Delete a client (and their loans/payments)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "204":
+          description: Deleted
+
+  # ── Loans ────────────────────────────────────────────────────────────────────
+  /admin/loans:
+    get:
+      operationId: listLoans
+      tags: [loans]
+      summary: List all loans with optional status filter
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, due_soon, overdue, locked, completed, all]
+        - name: clientId
+          in: query
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Loans list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LoanWithClient"
+    post:
+      operationId: createLoan
+      tags: [loans]
+      summary: Create a loan for a client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoanInput"
+      responses:
+        "201":
+          description: Created loan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Loan"
+
+  /admin/loans/{id}:
+    get:
+      operationId: getLoan
+      tags: [loans]
+      summary: Get a loan with its payment history
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Loan detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoanDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateLoan
+      tags: [loans]
+      summary: Update loan fields (status, dates, amounts)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoanUpdate"
+      responses:
+        "200":
+          description: Updated loan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Loan"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteLoan
+      tags: [loans]
+      summary: Delete a loan and its payments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "204":
+          description: Deleted
+
+  /admin/loans/{id}/lock:
+    post:
+      operationId: lockDevice
+      tags: [loans]
+      summary: Lock device — set loan status to locked
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Updated loan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Loan"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/loans/{id}/unlock:
+    post:
+      operationId: unlockDevice
+      tags: [loans]
+      summary: Unlock device — set loan status to active
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Updated loan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Loan"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Payments ─────────────────────────────────────────────────────────────────
+  /admin/payments:
+    get:
+      operationId: listPayments
+      tags: [payments]
+      summary: List all payments across all loans
+      parameters:
+        - name: loanId
+          in: query
+          schema:
+            type: number
+        - name: clientId
+          in: query
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Payments list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PaymentWithClient"
+    post:
+      operationId: recordPayment
+      tags: [payments]
+      summary: Record a payment against a loan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentInput"
+      responses:
+        "201":
+          description: Created payment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+
+  /admin/payments/{id}:
+    delete:
+      operationId: deletePayment
+      tags: [payments]
+      summary: Delete a payment record
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "204":
+          description: Deleted
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +522,438 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    ApkVersion:
+      type: object
+      properties:
+        id:
+          type: number
+        version:
+          type: string
+        fileName:
+          type: string
+        objectPath:
+          type: string
+        size:
+          type: number
+        contentType:
+          type: string
+        checksum:
+          type: string
+        status:
+          type: string
+          enum: [pending, active, archived]
+        createdAt:
+          type: string
+        publishedAt:
+          type: ["string", "null"]
+      required: [id, version, fileName, objectPath, size, contentType, checksum, status, createdAt, publishedAt]
+
+    ApkDistribution:
+      type: object
+      properties:
+        available:
+          type: boolean
+        current:
+          oneOf:
+            - $ref: "#/components/schemas/ApkVersion"
+            - type: "null"
+        versions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApkVersion"
+      required: [available, current, versions]
+
+    ApkUploadRequest:
+      type: object
+      properties:
+        fileName:
+          type: string
+          minLength: 5
+        size:
+          type: number
+          minimum: 1
+          maximum: 104857600
+        contentType:
+          type: string
+          enum: [application/vnd.android.package-archive, application/octet-stream]
+        version:
+          type: string
+          minLength: 1
+          maxLength: 64
+      required: [fileName, size, contentType, version]
+
+    ApkUploadUrl:
+      type: object
+      properties:
+        uploadURL:
+          type: string
+        objectPath:
+          type: string
+        version:
+          type: string
+      required: [uploadURL, objectPath, version]
+
+    RegisterApkVersionRequest:
+      allOf:
+        - $ref: "#/components/schemas/ApkUploadRequest"
+        - type: object
+          properties:
+            objectPath:
+              type: string
+          required: [objectPath]
+
+    # ── Domain entities ───────────────────────────────────────────────────────
+
+    Client:
+      type: object
+      properties:
+        id:
+          type: number
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, name, phone, createdAt]
+
+    Loan:
+      type: object
+      properties:
+        id:
+          type: number
+        clientId:
+          type: number
+        deviceModel:
+          type: string
+        deviceImei:
+          type: ["string", "null"]
+        totalAmount:
+          type: number
+        paidAmount:
+          type: number
+        monthlyPayment:
+          type: number
+        nextDueDate:
+          type: string
+        startDate:
+          type: string
+        totalMonths:
+          type: number
+        paidMonths:
+          type: number
+        gracePeriodDays:
+          type: number
+        status:
+          type: string
+          enum: [active, due_soon, overdue, locked, completed]
+        createdAt:
+          type: string
+      required: [id, clientId, deviceModel, totalAmount, paidAmount, monthlyPayment, nextDueDate, startDate, totalMonths, paidMonths, gracePeriodDays, status, createdAt]
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: number
+        loanId:
+          type: number
+        amount:
+          type: number
+        date:
+          type: string
+        method:
+          type: string
+          enum: [cash, transfer, card]
+        reference:
+          type: string
+        status:
+          type: string
+          enum: [completed, pending, failed]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, loanId, amount, date, method, reference, status, createdAt]
+
+    # ── Composed / enriched ───────────────────────────────────────────────────
+
+    ClientWithLoan:
+      type: object
+      properties:
+        id:
+          type: number
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        loan:
+          $ref: "#/components/schemas/Loan"
+      required: [id, name, phone, createdAt]
+
+    LoanWithClient:
+      type: object
+      properties:
+        id:
+          type: number
+        clientId:
+          type: number
+        deviceModel:
+          type: string
+        deviceImei:
+          type: ["string", "null"]
+        totalAmount:
+          type: number
+        paidAmount:
+          type: number
+        monthlyPayment:
+          type: number
+        nextDueDate:
+          type: string
+        startDate:
+          type: string
+        totalMonths:
+          type: number
+        paidMonths:
+          type: number
+        gracePeriodDays:
+          type: number
+        status:
+          type: string
+          enum: [active, due_soon, overdue, locked, completed]
+        createdAt:
+          type: string
+        client:
+          $ref: "#/components/schemas/Client"
+      required: [id, clientId, deviceModel, totalAmount, paidAmount, monthlyPayment, nextDueDate, startDate, totalMonths, paidMonths, gracePeriodDays, status, createdAt]
+
+    PaymentWithClient:
+      type: object
+      properties:
+        id:
+          type: number
+        loanId:
+          type: number
+        amount:
+          type: number
+        date:
+          type: string
+        method:
+          type: string
+          enum: [cash, transfer, card]
+        reference:
+          type: string
+        status:
+          type: string
+          enum: [completed, pending, failed]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        client:
+          $ref: "#/components/schemas/Client"
+        loan:
+          $ref: "#/components/schemas/Loan"
+      required: [id, loanId, amount, date, method, reference, status, createdAt]
+
+    ClientDetail:
+      type: object
+      properties:
+        id:
+          type: number
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        loan:
+          $ref: "#/components/schemas/Loan"
+        payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Payment"
+      required: [id, name, phone, createdAt, payments]
+
+    LoanDetail:
+      type: object
+      properties:
+        id:
+          type: number
+        clientId:
+          type: number
+        deviceModel:
+          type: string
+        deviceImei:
+          type: ["string", "null"]
+        totalAmount:
+          type: number
+        paidAmount:
+          type: number
+        monthlyPayment:
+          type: number
+        nextDueDate:
+          type: string
+        startDate:
+          type: string
+        totalMonths:
+          type: number
+        paidMonths:
+          type: number
+        gracePeriodDays:
+          type: number
+        status:
+          type: string
+          enum: [active, due_soon, overdue, locked, completed]
+        createdAt:
+          type: string
+        client:
+          $ref: "#/components/schemas/Client"
+        payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Payment"
+      required: [id, clientId, deviceModel, totalAmount, paidAmount, monthlyPayment, nextDueDate, startDate, totalMonths, paidMonths, gracePeriodDays, status, createdAt, payments]
+
+    DashboardSummary:
+      type: object
+      properties:
+        totalClients:
+          type: number
+        totalLoans:
+          type: number
+        activeLoans:
+          type: number
+        overdueLoans:
+          type: number
+        lockedLoans:
+          type: number
+        completedLoans:
+          type: number
+        totalCollected:
+          type: number
+        collectedThisMonth:
+          type: number
+        pendingBalance:
+          type: number
+      required: [totalClients, totalLoans, activeLoans, overdueLoans, lockedLoans, completedLoans, totalCollected, collectedThisMonth, pendingBalance]
+
+    # ── Input / update schemas ────────────────────────────────────────────────
+
+    ClientInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 2
+        phone:
+          type: string
+          minLength: 7
+        email:
+          type: string
+        address:
+          type: string
+      required: [name, phone]
+
+    ClientUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 2
+        phone:
+          type: string
+          minLength: 7
+        email:
+          type: string
+        address:
+          type: string
+
+    LoanInput:
+      type: object
+      properties:
+        clientId:
+          type: number
+        deviceModel:
+          type: string
+          minLength: 2
+        deviceImei:
+          type: string
+        totalAmount:
+          type: number
+          minimum: 1
+        monthlyPayment:
+          type: number
+          minimum: 1
+        startDate:
+          type: string
+        totalMonths:
+          type: number
+          minimum: 1
+        gracePeriodDays:
+          type: number
+          minimum: 0
+      required: [clientId, deviceModel, totalAmount, monthlyPayment, startDate, totalMonths]
+
+    LoanUpdate:
+      type: object
+      properties:
+        deviceModel:
+          type: string
+        deviceImei:
+          type: string
+        totalAmount:
+          type: number
+        monthlyPayment:
+          type: number
+        nextDueDate:
+          type: string
+        status:
+          type: string
+          enum: [active, due_soon, overdue, locked, completed]
+        paidAmount:
+          type: number
+        paidMonths:
+          type: number
+        gracePeriodDays:
+          type: number
+
+    PaymentInput:
+      type: object
+      properties:
+        loanId:
+          type: number
+        amount:
+          type: number
+          minimum: 0.01
+        date:
+          type: string
+        method:
+          type: string
+          enum: [cash, transfer, card]
+        notes:
+          type: string
+      required: [loanId, amount, date, method]

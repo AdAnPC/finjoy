@@ -26,6 +26,7 @@ app.use(
   }),
 );
 app.use(cors());
+// APK bytes are uploaded directly from the panel to App Storage via a signed URL.
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

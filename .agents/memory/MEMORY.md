@@ -1,0 +1,1 @@
+- [App Storage provisioning](app-storage-provisioning.md) — a transient internal provisioning failure may resolve on an idempotent retry; budget errors must be handled separately.
