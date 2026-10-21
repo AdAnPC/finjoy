@@ -1136,7 +1136,30 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Payment"
-      required: [id, clientId, deviceModel, totalAmount, paidAmount, monthlyPayment, nextDueDate, startDate, totalMonths, paidMonths, gracePeriodDays, status, createdAt, payments]
+        deviceEnrollment:
+          oneOf:
+            - $ref: "#/components/schemas/DeviceEnrollment"
+            - type: "null"
+      required: [id, clientId, deviceModel, totalAmount, paidAmount, monthlyPayment, nextDueDate, startDate, totalMonths, paidMonths, gracePeriodDays, status, createdAt, payments, deviceEnrollment]
+
+    DeviceEnrollment:
+      type: object
+      properties:
+        manufacturer:
+          type: [string, "null"]
+        model:
+          type: string
+        osVersion:
+          type: [string, "null"]
+        deviceAdminActive:
+          type: boolean
+        deviceOwner:
+          type: boolean
+        firstSeenAt:
+          type: string
+        lastSeenAt:
+          type: string
+      required: [model, deviceAdminActive, deviceOwner, firstSeenAt, lastSeenAt]
 
     DashboardSummary:
       type: object

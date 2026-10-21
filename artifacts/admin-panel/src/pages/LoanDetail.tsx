@@ -107,6 +107,37 @@ export default function LoanDetail() {
         />
       </div>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Dispositivo enlazado</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loan.deviceEnrollment ? (
+            <div className="grid gap-3 text-sm md:grid-cols-2">
+              <p>
+                Equipo: <b>{[loan.deviceEnrollment.manufacturer, loan.deviceEnrollment.model].filter(Boolean).join(" ")}</b>
+              </p>
+              <p>
+                Android: <b>{loan.deviceEnrollment.osVersion || "No disponible"}</b>
+              </p>
+              <p>
+                Administrador: <b>{loan.deviceEnrollment.deviceAdminActive ? "Activado" : "Pendiente"}</b>
+              </p>
+              <p>
+                Device Owner: <b>{loan.deviceEnrollment.deviceOwner ? "Activado" : "No disponible en instalación USB estándar"}</b>
+              </p>
+              <p className="text-muted-foreground">
+                Última conexión: {formatDate(loan.deviceEnrollment.lastSeenAt)}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Aún no se ha enlazado un teléfono. El cliente debe instalar la APK e iniciar sesión o activar su cuenta.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
         <Card>
           <CardHeader>

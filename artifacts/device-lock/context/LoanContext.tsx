@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import { AppState } from "react-native";
+import * as Device from "expo-device";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   getGetCustomerAccountQueryKey,
@@ -20,18 +21,14 @@ import {
 } from "@workspace/api-client-react";
 import {
   lockDeviceNow,
+  getDeviceIdHash,
+  isDeviceAdminActive,
+  isDeviceOwner,
   setCreditProtectionEnabled,
   setFrpAccounts,
   setKioskLockEnabled,
 } from "expo-device-admin";
 import { API_BASE_URL, API_IS_CONFIGURED } from "@/lib/api-config";
-import {
-  applyDemoLoanStatus,
-  applyDemoPaymentToLoan,
-  buildDemoPayment,
-  buildInitialDemoLoan,
-  buildInitialDemoPayments,
-} from "@/lib/demo-data";
 
 export type LoanStatus = "active" | "due_soon" | "overdue" | "locked" | "completed";
 export type PaymentMethod = "cash" | "transfer" | "card";
@@ -72,9 +69,6 @@ interface LoanContextType {
   openPaymentModal: () => void;
   closePaymentModal: () => void;
   makePay: (amount: number, method: PaymentMethod) => Promise<void>;
-  setLoanStatus: (status: LoanStatus) => void;
-  resetDemo: () => void;
-  enterDemoMode: () => void;
   login: (phone: string, password: string) => Promise<void>;
   activate: (code: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -165,11 +159,9 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [cachedAccount, setCachedAccount] = useState<CustomerAccount | null>(null);
+  const [deviceRegistrationError, setDeviceRegistrationError] = useState<string | null>(null);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [isDemoMode, setIsDemoMode] = useState<boolean>(!API_IS_CONFIGURED);
-  const [demoLoan, setDemoLoan] = useState<Loan>(() => buildInitialDemoLoan());
-  const [demoPayments, setDemoPayments] = useState<Payment[]>(() => buildInitialDemoPayments());
   const [, setClockTick] = useState(0);
   const wasLockedRef = useRef(false);
 
@@ -179,7 +171,7 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
   const accountQuery = useGetCustomerAccount({
     query: {
       queryKey: getGetCustomerAccountQueryKey(),
-      enabled: Boolean(sessionToken) && API_IS_CONFIGURED && !isDemoMode,
+      enabled: Boolean(sessionToken) && API_IS_CONFIGURED,
       retry: false,
       refetchInterval: 60_000,
     },
@@ -209,9 +201,6 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
         }
         if (token) {
           setSessionToken(token);
-          if (API_IS_CONFIGURED) {
-            setIsDemoMode(false);
-          }
         }
       })
       .catch(() => {
@@ -245,22 +234,68 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active" && sessionToken && API_IS_CONFIGURED && !isDemoMode) {
+      if (state === "active" && sessionToken && API_IS_CONFIGURED) {
         void accountQuery.refetch();
       }
     });
     return () => subscription.remove();
-  }, [accountQuery.refetch, sessionToken, isDemoMode]);
+  }, [accountQuery.refetch, sessionToken]);
 
   const saveSession = useCallback(
     async (token: string) => {
       await SecureStore.setItemAsync(SESSION_KEY, token);
       setSessionToken(token);
-      setIsDemoMode(false);
       await queryClient.invalidateQueries();
     },
     [queryClient],
   );
+
+  const registerDevice = useCallback(async (token: string) => {
+    if (!API_IS_CONFIGURED) {
+      throw new Error("No se configuró la conexión segura con el servidor de FinJoy.");
+    }
+    const deviceIdHash = await getDeviceIdHash();
+    if (!deviceIdHash) {
+      throw new Error("No se pudo identificar este teléfono Android.");
+    }
+    const [deviceAdminActive, deviceOwner] = await Promise.all([
+      isDeviceAdminActive(),
+      isDeviceOwner(),
+    ]);
+    const response = await fetch(`${API_BASE_URL}/api/customer/device/register`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        deviceIdHash,
+        manufacturer: Device.brand ?? null,
+        model: Device.modelName ?? Device.modelId ?? "Android",
+        osVersion: Device.osVersion ?? null,
+        deviceAdminActive,
+        deviceOwner,
+      }),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      throw new Error(typeof result?.error === "string" ? result.error : "No se pudo registrar el dispositivo con FinJoy.");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!sessionToken || !API_IS_CONFIGURED) return;
+    const syncDevice = () => {
+      void registerDevice(sessionToken)
+        .then(() => setDeviceRegistrationError(null))
+        .catch((error) => setDeviceRegistrationError(accountErrorMessage(error)));
+    };
+    syncDevice();
+    const interval = setInterval(() => {
+      syncDevice();
+    }, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [registerDevice, sessionToken]);
 
   const login = useCallback(
     async (phone: string, password: string) => {
@@ -270,9 +305,10 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
       const session = await loginMutation.mutateAsync({
         data: { phone, password },
       });
+      await registerDevice(session.token);
       await saveSession(session.token);
     },
-    [loginMutation, saveSession],
+    [loginMutation, registerDevice, saveSession],
   );
 
   const activate = useCallback(
@@ -283,14 +319,15 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
       const session = await activateMutation.mutateAsync({
         data: { code, password },
       });
+      await registerDevice(session.token);
       await saveSession(session.token);
     },
-    [activateMutation, saveSession],
+    [activateMutation, registerDevice, saveSession],
   );
 
   const logout = useCallback(async () => {
     try {
-      if (sessionToken && !isDemoMode) await logoutMutation.mutateAsync();
+      if (sessionToken && API_IS_CONFIGURED) await logoutMutation.mutateAsync();
     } catch {
       // Clear the local session even when the network is unavailable.
     } finally {
@@ -298,39 +335,20 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
       await SecureStore.deleteItemAsync(CACHED_ACCOUNT_KEY).catch(() => undefined);
       setSessionToken(null);
       setCachedAccount(null);
-      setIsDemoMode(false);
       queryClient.clear();
     }
-  }, [logoutMutation, queryClient, sessionToken, isDemoMode]);
+  }, [logoutMutation, queryClient, sessionToken]);
 
   const refreshAccount = useCallback(async () => {
-    if (sessionToken && API_IS_CONFIGURED && !isDemoMode) {
+    if (sessionToken && API_IS_CONFIGURED) {
       await accountQuery.refetch();
     }
-  }, [accountQuery.refetch, sessionToken, isDemoMode]);
-
-  const setLoanStatus = useCallback((status: LoanStatus) => {
-    setIsDemoMode(true);
-    setDemoLoan((prev) => applyDemoLoanStatus(prev, status));
-  }, []);
-
-  const resetDemo = useCallback(() => {
-    setIsDemoMode(true);
-    setDemoLoan(buildInitialDemoLoan());
-    setDemoPayments(buildInitialDemoPayments());
-  }, []);
-
-  const enterDemoMode = useCallback(() => {
-    setIsDemoMode(true);
-  }, []);
+  }, [accountQuery.refetch, sessionToken]);
 
   const makePay = useCallback(
     async (amount: number, method: PaymentMethod) => {
-      if (isDemoMode || !API_IS_CONFIGURED || !sessionToken) {
-        const newPayment = buildDemoPayment(amount, method);
-        setDemoPayments((prev) => [newPayment, ...prev]);
-        setDemoLoan((prev) => applyDemoPaymentToLoan(prev, amount));
-        return;
+      if (!API_IS_CONFIGURED || !sessionToken) {
+        throw new Error("Se requiere conexión con el servidor para registrar un pago.");
       }
 
       const response = await fetch(`${API_BASE_URL}/api/customer/payments`, {
@@ -348,44 +366,42 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
 
       await accountQuery.refetch();
     },
-    [accountQuery, isDemoMode, sessionToken],
+    [accountQuery, sessionToken],
   );
 
   const activeAccountData = accountQuery.data ?? cachedAccount;
   const currentAccount = activeAccountData ? mapAccount(activeAccountData) : null;
-  const rawLoan = isDemoMode ? demoLoan : (currentAccount?.loan ?? null);
+  const rawLoan = currentAccount?.loan ?? null;
   const daysUntilDue = rawLoan ? daysUntilDate(rawLoan.nextDueDate) : 0;
   const loan = rawLoan
     ? {
         ...rawLoan,
-        status: isDemoMode
-          ? rawLoan.status
-          : resolveEffectiveLoanStatus(rawLoan, daysUntilDue),
+        status: resolveEffectiveLoanStatus(rawLoan, daysUntilDue),
       }
     : null;
-  const payments = isDemoMode ? demoPayments : (currentAccount?.payments ?? []);
-  const clientName = isDemoMode ? demoLoan.clientName : (activeAccountData?.client.name ?? null);
+  const payments = currentAccount?.payments ?? [];
+  const clientName = activeAccountData?.client.name ?? null;
   const progressPercent = loan
     ? Math.min((loan.paidMonths / loan.totalMonths) * 100, 100)
     : 0;
   const errorStatus = accountErrorStatus(accountQuery.error);
   const syncError =
-    !isDemoMode && sessionToken && accountQuery.error && errorStatus !== 401
+    deviceRegistrationError ??
+    (sessionToken && accountQuery.error && errorStatus !== 401
       ? accountErrorMessage(accountQuery.error)
-      : null;
+      : null);
   const isLoading =
     isSessionLoading ||
-    (!isDemoMode &&
-      Boolean(sessionToken) &&
+    (Boolean(sessionToken) &&
       API_IS_CONFIGURED &&
       accountQuery.isLoading &&
       !cachedAccount);
-  const isAuthenticated = isDemoMode || Boolean(sessionToken && activeAccountData);
-  const hasSession = isDemoMode || Boolean(sessionToken);
+  const isAuthenticated = Boolean(sessionToken && activeAccountData);
+  const hasSession = Boolean(sessionToken);
   const isDeviceLocked =
     loan?.status === "locked" || loan?.status === "overdue";
   const isUnauthenticatedInProd =
-    !isSessionLoading && API_IS_CONFIGURED && !isDemoMode && !isAuthenticated;
+    !isSessionLoading && API_IS_CONFIGURED && !isAuthenticated;
   const shouldEnforceKiosk = isDeviceLocked || isUnauthenticatedInProd;
   const shouldProtectCredit = loan ? loan.status !== "completed" : true;
   const frpAccountIds = (
@@ -424,9 +440,6 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
       openPaymentModal: () => setIsPaymentModalOpen(true),
       closePaymentModal: () => setIsPaymentModalOpen(false),
       makePay,
-      setLoanStatus,
-      resetDemo,
-      enterDemoMode,
       login,
       activate,
       logout,
@@ -434,7 +447,7 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       isAuthenticated,
       hasSession,
-      apiConfigured: API_IS_CONFIGURED || isDemoMode,
+      apiConfigured: API_IS_CONFIGURED,
       syncError,
     }),
     [
@@ -446,9 +459,6 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
       progressPercent,
       isPaymentModalOpen,
       makePay,
-      setLoanStatus,
-      resetDemo,
-      enterDemoMode,
       login,
       activate,
       logout,
@@ -456,7 +466,6 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       isAuthenticated,
       hasSession,
-      isDemoMode,
       syncError,
     ],
   );

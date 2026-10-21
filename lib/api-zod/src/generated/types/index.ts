@@ -31,6 +31,7 @@ export * from './customerPaymentMethod';
 export * from './customerPaymentStatus';
 export * from './customerSession';
 export * from './dashboardSummary';
+export * from './deviceEnrollment';
 export * from './errorResponse';
 export * from './healthStatus';
 export * from './issueActivationCodeRequest';

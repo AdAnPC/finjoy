@@ -615,7 +615,16 @@ export const GetLoanResponse = zod.object({
   "status": zod.enum(['completed', 'pending', 'failed']),
   "notes": zod.string().nullish(),
   "createdAt": zod.string()
-}))
+})),
+  "deviceEnrollment": zod.union([zod.object({
+  "manufacturer": zod.string().nullish(),
+  "model": zod.string(),
+  "osVersion": zod.string().nullish(),
+  "deviceAdminActive": zod.boolean(),
+  "deviceOwner": zod.boolean(),
+  "firstSeenAt": zod.string(),
+  "lastSeenAt": zod.string()
+}),zod.null()])
 })
 
 

@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { and, eq, type SQL } from "drizzle-orm";
-import { db, clientsTable, loansTable, paymentsTable, type Loan } from "@workspace/db";
+import { db, clientsTable, customerDevicesTable, loansTable, paymentsTable, type Loan } from "@workspace/db";
 import {
   CreateLoanBody,
   UpdateLoanBody,
@@ -149,11 +149,46 @@ router.get("/admin/loans/:id", async (req, res): Promise<void> => {
     .where(eq(paymentsTable.loanId, id))
     .orderBy(paymentsTable.date);
 
+  let device: {
+    manufacturer: string | null;
+    model: string;
+    osVersion: string | null;
+    deviceAdminActive: boolean;
+    deviceOwner: boolean;
+    firstSeenAt: Date;
+    lastSeenAt: Date;
+  } | undefined;
+  try {
+    [device] = await db
+      .select({
+        manufacturer: customerDevicesTable.manufacturer,
+        model: customerDevicesTable.model,
+        osVersion: customerDevicesTable.osVersion,
+        deviceAdminActive: customerDevicesTable.deviceAdminActive,
+        deviceOwner: customerDevicesTable.deviceOwner,
+        firstSeenAt: customerDevicesTable.firstSeenAt,
+        lastSeenAt: customerDevicesTable.lastSeenAt,
+      })
+      .from(customerDevicesTable)
+      .where(eq(customerDevicesTable.loanId, id))
+      .limit(1);
+  } catch (error) {
+    if ((error as { code?: string })?.code !== "42P01") throw error;
+    req.log.warn("Customer device table is not migrated yet");
+  }
+
   res.json(
     GetLoanResponse.parse({
       ...serializeLoan(syncedLoan),
       client: row.client ? serializeClient(row.client) : undefined,
       payments: payments.map(serializePayment),
+      deviceEnrollment: device
+        ? {
+            ...device,
+            firstSeenAt: device.firstSeenAt.toISOString(),
+            lastSeenAt: device.lastSeenAt.toISOString(),
+          }
+        : null,
     }),
   );
 });

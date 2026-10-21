@@ -11,16 +11,28 @@ Este proyecto incluye un asistente local para crear una APK Android instalable. 
 
 ## Crear la APK
 
+Antes de compilar una APK conectada al sistema real, define `EXPO_PUBLIC_API_URL` con la URL HTTPS pública del servicio API (por ejemplo, la URL de Railway). La URL se incorpora al compilar la app. Sin ella, la app no podrá iniciar sesión ni enlazar el teléfono.
+
 - **Windows:** haz doble clic en `GENERAR_APK_WINDOWS.bat`.
 - **macOS/Linux:** abre una terminal en la carpeta del proyecto y ejecuta `bash GENERAR_APK_MAC_LINUX.sh`.
 
 El asistente instala las dependencias, genera el proyecto Android de Expo si todavía no existe y compila la variante instalable. Al terminar, encontrarás `FinJoy-debug.apk` dentro de `generated-apk/`.
 
-## Instalar en Android
+## Enlazar e instalar en Android
 
-Copia `generated-apk/FinJoy-debug.apk` al teléfono y ábrelo. Android puede pedir permiso para instalar aplicaciones desde esa fuente y solicitar que FinJoy se active como Administrador del dispositivo. La APK no se instala silenciosamente.
+La APK se puede instalar por USB sin restablecer el teléfono. Con la depuración USB activada y el dispositivo autorizado, ejecuta desde la raíz del proyecto:
 
-La APK contiene el código y los recursos de la app; no necesita Expo Go, Metro ni un dominio de Replit para arrancar. Las funciones actuales y los datos de crédito funcionan en el dispositivo y se guardan localmente. No hay sincronización con el panel/API todavía.
+```powershell
+adb install -r .\generated-apk\FinJoy-debug.apk
+```
+
+Después abre FinJoy y activa la cuenta o inicia sesión. En ese momento la app registra en el servidor una huella SHA-256 del identificador Android junto con el modelo, versión de Android y permisos de administración detectados. El panel muestra esos datos en el detalle del préstamo. No se envía ni almacena el IMEI como identificador de la instalación.
+
+Antes de instalar esta versión, aplica una vez `lib/db/migrations/0001_customer_devices.sql` a la base PostgreSQL de Railway. La app necesita que el API y esa tabla estén publicados para completar el enlace.
+
+Android solicitará consentimiento para activar FinJoy como Administrador del dispositivo y para la superposición. Con una instalación USB normal estos permisos ofrecen controles limitados: no hacen a FinJoy Device Owner y no impiden de forma fiable que el usuario desinstale la app o restablezca el teléfono. Para esos controles se requiere aprovisionamiento administrado durante la configuración inicial del equipo.
+
+La app ya no ofrece el modo Demo. Requiere una cuenta real del servidor para mostrar crédito y registrar pagos.
 
 ## Notas importantes
 
