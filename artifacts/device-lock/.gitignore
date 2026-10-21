@@ -39,3 +39,8 @@ yarn-error.*
 .vercel
 
 .env
+
+# Keep the custom Expo module's Android implementation in source control.
+!modules/expo-device-admin/android/
+!modules/expo-device-admin/android/**
+modules/expo-device-admin/android/build/

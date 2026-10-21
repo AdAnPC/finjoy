@@ -1,74 +1,20 @@
 import React from 'react';
-import {
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
 import { useSafeAreaPadding } from '@/hooks/useSafeAreaPadding';
-import { useLoan, LoanStatus } from '@/context/LoanContext';
+import { useLoan } from '@/context/LoanContext';
 import { formatCurrency, formatLongDate, getInitials } from '@/lib/formatters';
-
-interface DemoButtonProps {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  accentColor: string;
-  onPress: () => void;
-}
-
-function DemoButton({ icon, label, accentColor, onPress }: DemoButtonProps) {
-  return (
-    <TouchableOpacity
-      style={[
-        styles.demoBtn,
-        { borderColor: accentColor, backgroundColor: accentColor + '18' },
-      ]}
-      onPress={onPress}
-      activeOpacity={0.75}
-    >
-      <Ionicons name={icon} size={16} color={accentColor} />
-      <Text style={[styles.demoBtnText, { color: accentColor }]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
 
 export default function AccountScreen() {
   const colors = useColors();
   const { topPad, bottomPad } = useSafeAreaPadding();
-  const { loan, setLoanStatus, resetDemo } = useLoan();
+  const { loan } = useLoan();
 
   if (!loan) return null;
 
   const initials = getInitials(loan.clientName);
   const remaining = loan.totalAmount - loan.paidAmount;
-
-  const simulate = (status: LoanStatus) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setLoanStatus(status);
-  };
-
-  const handleReset = () => {
-    Alert.alert(
-      'Restablecer Demo',
-      '¿Quieres volver al estado inicial de demostración?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Restablecer',
-          style: 'destructive',
-          onPress: () => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            resetDemo();
-          },
-        },
-      ]
-    );
-  };
 
   return (
     <ScrollView
@@ -148,57 +94,6 @@ export default function AccountScreen() {
         ))}
       </View>
 
-      {/* Demo controls */}
-      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <View style={styles.demoTitleRow}>
-          <Ionicons name="flask-outline" size={16} color={colors.warning} />
-          <Text style={[styles.cardTitle, { color: colors.foreground, marginBottom: 0 }]}>
-            Modo Demo
-          </Text>
-        </View>
-        <Text style={[styles.demoSub, { color: colors.mutedForeground }]}>
-          Simula diferentes estados para probar la app
-        </Text>
-
-        <View style={styles.demoGrid}>
-          <DemoButton
-            icon="shield-checkmark-outline"
-            label="Al día"
-            accentColor={colors.primary}
-            onPress={() => simulate('active')}
-          />
-          <DemoButton
-            icon="time-outline"
-            label="Próximo"
-            accentColor={colors.warning}
-            onPress={() => simulate('due_soon')}
-          />
-          <DemoButton
-            icon="warning-outline"
-            label="Vencido"
-            accentColor={colors.danger}
-            onPress={() => simulate('overdue')}
-          />
-          <DemoButton
-            icon="lock-closed-outline"
-            label="Bloqueado"
-            accentColor={colors.danger}
-            onPress={() => simulate('locked')}
-          />
-        </View>
-
-        <TouchableOpacity
-          style={[styles.resetBtn, { borderColor: colors.border }]}
-          onPress={handleReset}
-          activeOpacity={0.75}
-        >
-          <Ionicons name="refresh-outline" size={16} color={colors.mutedForeground} />
-          <Text style={[styles.resetText, { color: colors.mutedForeground }]}>
-            Restablecer Demo
-          </Text>
-        </TouchableOpacity>
-      </View>
-
       {/* App info */}
       <View style={styles.appInfo}>
         <MaterialCommunityIcons name="shield-lock" size={16} color={colors.mutedForeground} />
@@ -261,35 +156,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     lineHeight: 20,
   },
-
-  demoTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 6,
-  },
-  demoSub: { fontSize: 13, fontFamily: 'Inter_400Regular', marginBottom: 20 },
-  demoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
-  demoBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1.5,
-  },
-  demoBtnText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
-  resetBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 13,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  resetText: { fontSize: 14, fontFamily: 'Inter_500Medium' },
 
   appInfo: {
     flexDirection: 'row',

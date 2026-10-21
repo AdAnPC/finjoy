@@ -9,6 +9,7 @@ import { and, desc, eq, gt, sql } from "drizzle-orm";
 import {
   clientAccountsTable,
   clientsTable,
+  customerDevicesTable,
   customerSessionsTable,
   db,
   loansTable,
@@ -24,6 +25,119 @@ const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 const ACTIVATE_LIMIT = { max: 5, windowMs: 15 * 60 * 1000 };
 const LOGIN_LIMIT = { max: 10, windowMs: 15 * 60 * 1000 };
 const requestCounts = new Map<string, { count: number; resetsAt: number }>();
+
+router.post("/customer/device/register", async (req, res): Promise<void> => {
+  try {
+    const session = await getCustomerSession(req);
+    if (!session) {
+      res.status(401).json({ error: "Inicia sesión para registrar este dispositivo" });
+      return;
+    }
+
+    const body = req.body as {
+      deviceIdHash?: unknown;
+      manufacturer?: unknown;
+      model?: unknown;
+      osVersion?: unknown;
+      deviceAdminActive?: unknown;
+      deviceOwner?: unknown;
+    } | undefined;
+    if (
+      typeof body?.deviceIdHash !== "string" ||
+      !/^[a-f0-9]{64}$/i.test(body.deviceIdHash) ||
+      typeof body.model !== "string" ||
+      body.model.trim().length < 1 ||
+      body.model.length > 160 ||
+      (body.manufacturer != null && typeof body.manufacturer !== "string") ||
+      (body.osVersion != null && typeof body.osVersion !== "string") ||
+      typeof body.deviceAdminActive !== "boolean" ||
+      typeof body.deviceOwner !== "boolean"
+    ) {
+      res.status(400).json({ error: "Datos del dispositivo inválidos" });
+      return;
+    }
+
+    const deviceIdHash = body.deviceIdHash.toLowerCase();
+    const [loan] = await db
+      .select({ id: loansTable.id })
+      .from(loansTable)
+      .where(and(eq(loansTable.clientId, session.clientId), sql`${loansTable.status} <> 'completed'`))
+      .orderBy(desc(loansTable.createdAt))
+      .limit(1);
+
+    const now = new Date();
+    const values = {
+      clientId: session.clientId,
+      loanId: loan?.id ?? null,
+      deviceIdHash,
+      manufacturer: typeof body.manufacturer === "string" ? body.manufacturer.slice(0, 120) : null,
+      model: body.model.trim().slice(0, 160),
+      osVersion: typeof body.osVersion === "string" ? body.osVersion.slice(0, 80) : null,
+      deviceAdminActive: body.deviceAdminActive,
+      deviceOwner: body.deviceOwner,
+      lastSeenAt: now,
+    };
+    const registration = await db.transaction(async (tx) => {
+      const [inserted] = await tx
+        .insert(customerDevicesTable)
+        .values(values)
+        .onConflictDoNothing({ target: customerDevicesTable.deviceIdHash })
+        .returning({
+          id: customerDevicesTable.id,
+          clientId: customerDevicesTable.clientId,
+          loanId: customerDevicesTable.loanId,
+          lastSeenAt: customerDevicesTable.lastSeenAt,
+        });
+      if (inserted) return { device: inserted, created: true, conflict: false };
+
+      const [existing] = await tx
+        .select({ id: customerDevicesTable.id, clientId: customerDevicesTable.clientId })
+        .from(customerDevicesTable)
+        .where(eq(customerDevicesTable.deviceIdHash, deviceIdHash))
+        .limit(1);
+      if (!existing || existing.clientId !== session.clientId) {
+        return { device: null, created: false, conflict: true };
+      }
+
+      const [updated] = await tx
+        .update(customerDevicesTable)
+        .set({
+          loanId: values.loanId,
+          manufacturer: values.manufacturer,
+          model: values.model,
+          osVersion: values.osVersion,
+          deviceAdminActive: values.deviceAdminActive,
+          deviceOwner: values.deviceOwner,
+          lastSeenAt: now,
+        })
+        .where(and(
+          eq(customerDevicesTable.id, existing.id),
+          eq(customerDevicesTable.clientId, session.clientId),
+        ))
+        .returning({
+          id: customerDevicesTable.id,
+          clientId: customerDevicesTable.clientId,
+          loanId: customerDevicesTable.loanId,
+          lastSeenAt: customerDevicesTable.lastSeenAt,
+        });
+      return { device: updated ?? null, created: false, conflict: !updated };
+    });
+
+    if (registration.conflict || !registration.device) {
+      res.status(409).json({ error: "Este dispositivo ya está asociado a otra cuenta. Contacta a FinJoy." });
+      return;
+    }
+
+    res.status(registration.created ? 201 : 200).json({
+      id: registration.device.id,
+      loanId: registration.device.loanId,
+      lastSeenAt: registration.device.lastSeenAt.toISOString(),
+    });
+  } catch (error) {
+    req.log.error({ err: error }, "Failed to register customer device");
+    res.status(500).json({ error: "No se pudo registrar el dispositivo" });
+  }
+});
 
 router.post("/customer/auth/activate", async (req, res): Promise<void> => {
   if (isRateLimited(req.ip ?? "unknown", "activate", ACTIVATE_LIMIT)) {

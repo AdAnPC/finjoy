@@ -377,6 +377,19 @@ export interface LoanDetail {
   createdAt: string;
   client?: Client;
   payments: Payment[];
+  deviceEnrollment: DeviceEnrollment | null;
+}
+
+export interface DeviceEnrollment {
+  /** @nullable */
+  manufacturer?: string | null;
+  model: string;
+  /** @nullable */
+  osVersion?: string | null;
+  deviceAdminActive: boolean;
+  deviceOwner: boolean;
+  firstSeenAt: string;
+  lastSeenAt: string;
 }
 
 export interface DashboardSummary {

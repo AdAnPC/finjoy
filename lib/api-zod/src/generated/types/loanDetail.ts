@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { Client } from './client';
+import type { DeviceEnrollment } from './deviceEnrollment';
 import type { LoanDetailStatus } from './loanDetailStatus';
 import type { Payment } from './payment';
 
@@ -27,4 +28,5 @@ export interface LoanDetail {
   createdAt: string;
   client?: Client;
   payments: Payment[];
+  deviceEnrollment: DeviceEnrollment | null;
 }

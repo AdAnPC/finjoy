@@ -39,6 +39,17 @@ export async function isDeviceOwner(): Promise<boolean> {
   }
 }
 
+/** Returns a SHA-256 fingerprint of Android's app-scoped device ID. */
+export async function getDeviceIdHash(): Promise<string | null> {
+  if (!isSupported || !ExpoDeviceAdmin) return null;
+  try {
+    const value = await ExpoDeviceAdmin.getDeviceIdHash();
+    return typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Opens the Android system dialog asking the user to grant Device Admin.
  */

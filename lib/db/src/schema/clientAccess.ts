@@ -4,9 +4,11 @@ import {
   serial,
   text,
   timestamp,
+  boolean,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
+import { loansTable } from "./loans";
 
 export const clientAccountsTable = pgTable("client_accounts", {
   clientId: integer("client_id")
@@ -34,5 +36,26 @@ export const customerSessionsTable = pgTable(
   (table) => [uniqueIndex("customer_sessions_token_hash_idx").on(table.tokenHash)],
 );
 
+export const customerDevicesTable = pgTable(
+  "customer_devices",
+  {
+    id: serial("id").primaryKey(),
+    clientId: integer("client_id")
+      .notNull()
+      .references(() => clientsTable.id, { onDelete: "cascade" }),
+    loanId: integer("loan_id").references(() => loansTable.id, { onDelete: "set null" }),
+    deviceIdHash: text("device_id_hash").notNull(),
+    manufacturer: text("manufacturer"),
+    model: text("model").notNull(),
+    osVersion: text("os_version"),
+    deviceAdminActive: boolean("device_admin_active").notNull().default(false),
+    deviceOwner: boolean("device_owner").notNull().default(false),
+    firstSeenAt: timestamp("first_seen_at").defaultNow().notNull(),
+    lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("customer_devices_device_id_hash_idx").on(table.deviceIdHash)],
+);
+
 export type ClientAccount = typeof clientAccountsTable.$inferSelect;
 export type CustomerSession = typeof customerSessionsTable.$inferSelect;
+export type CustomerDevice = typeof customerDevicesTable.$inferSelect;

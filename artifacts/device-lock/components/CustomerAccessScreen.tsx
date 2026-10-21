@@ -24,7 +24,7 @@ type Props = {
 export function CustomerAccessScreen({ syncError, onRetry, onLogout }: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { login, activate, apiConfigured, enterDemoMode } = useLoan();
+  const { login, activate, apiConfigured } = useLoan();
   const [mode, setMode] = useState<"login" | "activate">("login");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
@@ -223,15 +223,6 @@ export function CustomerAccessScreen({ syncError, onRetry, onLogout }: Props) {
           </Text>
         </Pressable>
 
-        <Pressable
-          accessibilityRole="button"
-          style={[styles.primaryButton, { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.primary, marginTop: 8 }]}
-          onPress={enterDemoMode}
-        >
-          <Text style={[styles.primaryButtonText, { color: colors.primary }]}>
-            Entrar en Modo Demo (Probar Bloqueo)
-          </Text>
-        </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
   );
