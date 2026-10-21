@@ -6,6 +6,9 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "expo-device-admin": [
+        "./modules/expo-device-admin"
       ]
     }
   },

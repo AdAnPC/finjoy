@@ -1,57 +1,42 @@
 import React from 'react';
 import {
   FlatList,
-  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { PaidStatusPill } from '@/components/PaidStatusPill';
 import { useColors } from '@/hooks/useColors';
-import { useLoan, Payment, PaymentMethod } from '@/context/LoanContext';
-
-function formatCurrency(n: number): string {
-  return '$' + n.toLocaleString('es-MX', { minimumFractionDigits: 2 });
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('es-MX', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
-const METHOD_META: Record<PaymentMethod, { label: string; icon: keyof typeof Ionicons.glyphMap }> = {
-  cash: { label: 'Efectivo', icon: 'cash-outline' },
-  transfer: { label: 'Transferencia', icon: 'swap-horizontal-outline' },
-  card: { label: 'Tarjeta', icon: 'card-outline' },
-};
+import { useSafeAreaPadding } from '@/hooks/useSafeAreaPadding';
+import { useLoan, Payment } from '@/context/LoanContext';
+import {
+  formatCurrency,
+  formatShortDate,
+  PAYMENT_METHOD_META,
+} from '@/lib/formatters';
 
 function PaymentRow({ item }: { item: Payment }) {
   const colors = useColors();
-  const meta = METHOD_META[item.method];
+  const meta = PAYMENT_METHOD_META[item.method];
   return (
     <View style={[styles.row, { borderBottomColor: colors.border }]}>
       <View style={[styles.methodBubble, { backgroundColor: 'rgba(0,200,150,0.12)' }]}>
-        <Ionicons name={meta.icon} size={18} color={colors.primary} />
+        <Ionicons name={meta.outlineIcon} size={18} color={colors.primary} />
       </View>
       <View style={styles.rowMeta}>
         <Text style={[styles.rowRef, { color: colors.foreground }]}>{item.reference}</Text>
         <Text style={[styles.rowSub, { color: colors.mutedForeground }]}>
-          {formatDate(item.date)} · {meta.label}
+          {formatShortDate(item.date)} · {meta.label}
         </Text>
       </View>
       <View style={styles.rowRight}>
         <Text style={[styles.rowAmount, { color: colors.foreground }]}>
           {formatCurrency(item.amount)}
         </Text>
-        <View style={[styles.paidPill, { backgroundColor: 'rgba(48,209,88,0.12)' }]}>
-          <Text style={styles.paidLabel}>Pagado</Text>
-        </View>
+        <PaidStatusPill />
       </View>
     </View>
   );
@@ -59,11 +44,9 @@ function PaymentRow({ item }: { item: Payment }) {
 
 export default function PaymentsScreen() {
   const colors = useColors();
-  const insets = useSafeAreaInsets();
+  const { topPad, bottomPad } = useSafeAreaPadding();
   const { loan, payments, openPaymentModal } = useLoan();
 
-  const topPad = insets.top + (Platform.OS === 'web' ? 67 : 0);
-  const bottomPad = insets.bottom + (Platform.OS === 'web' ? 34 : 0);
   const canPay = loan && loan.status !== 'completed';
   const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
 

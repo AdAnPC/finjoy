@@ -1,5 +1,12 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
+import {
+  Router,
+  type IRouter,
+  type Request,
+  type Response,
+  type NextFunction,
+} from "express";
+import { readBearerToken } from "../../lib/http";
 
 const router: IRouter = Router();
 
@@ -16,20 +23,7 @@ router.get("/admin/auth/status", (_req, res): void => {
 });
 
 router.post("/admin/auth/verify", (req, res): void => {
-  const status = adminAuthStatus();
-  if (!status.required) {
-    res.json({ valid: true });
-    return;
-  }
-  if (!status.configured) {
-    res.status(503).json({ error: "ADMIN_API_KEY debe tener al menos 32 caracteres" });
-    return;
-  }
-
-  const suppliedKey = readBearerToken(req);
-  const expectedKey = process.env.ADMIN_API_KEY?.trim() ?? "";
-  if (!suppliedKey || !constantTimeMatches(suppliedKey, expectedKey)) {
-    res.status(401).json({ error: "Clave administrativa inválida" });
+  if (!verifyRequestAdminKey(req, res, "ADMIN_API_KEY debe tener al menos 32 caracteres", "Clave administrativa inválida")) {
     return;
   }
   res.json({ valid: true });
@@ -40,30 +34,34 @@ export function requireAdminApiKey(
   res: Response,
   next: NextFunction,
 ): void {
-  const status = adminAuthStatus();
-  if (!status.required) {
-    next();
-    return;
-  }
-  if (!status.configured) {
-    res.status(503).json({ error: "Configura ADMIN_API_KEY con al menos 32 caracteres" });
-    return;
-  }
-
-  const suppliedKey = readBearerToken(req);
-  const expectedKey = process.env.ADMIN_API_KEY?.trim() ?? "";
-  if (!suppliedKey || !constantTimeMatches(suppliedKey, expectedKey)) {
-    res.status(401).json({ error: "Autenticación administrativa requerida" });
+  if (!verifyRequestAdminKey(req, res, "Configura ADMIN_API_KEY con al menos 32 caracteres", "Autenticación administrativa requerida")) {
     return;
   }
   next();
 }
 
-function readBearerToken(req: Request): string | null {
-  const value = req.header("authorization");
-  if (!value?.startsWith("Bearer ")) return null;
-  const token = value.slice("Bearer ".length).trim();
-  return token || null;
+function verifyRequestAdminKey(
+  req: Request,
+  res: Response,
+  unconfiguredMessage: string,
+  unauthorizedMessage: string,
+): boolean {
+  const status = adminAuthStatus();
+  if (!status.required) {
+    return true;
+  }
+  if (!status.configured) {
+    res.status(503).json({ error: unconfiguredMessage });
+    return false;
+  }
+
+  const suppliedKey = readBearerToken(req);
+  const expectedKey = process.env.ADMIN_API_KEY?.trim() ?? "";
+  if (!suppliedKey || !constantTimeMatches(suppliedKey, expectedKey)) {
+    res.status(401).json({ error: unauthorizedMessage });
+    return false;
+  }
+  return true;
 }
 
 function constantTimeMatches(left: string, right: string): boolean {

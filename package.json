@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "license": "MIT",
   "scripts": {
+    "dev": "node --env-file=.env scripts/dev-local.cjs",
     "preinstall": "node scripts/preinstall.cjs",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "dev:local": "node --env-file=.env scripts/dev-local.cjs",

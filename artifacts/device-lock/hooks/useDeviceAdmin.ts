@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Platform } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 import * as DeviceAdmin from 'expo-device-admin';
 
 export interface DeviceAdminState {
@@ -7,63 +7,76 @@ export interface DeviceAdminState {
   isSupported: boolean;
   /** Whether the app currently holds Device Admin privileges. */
   isActive: boolean;
+  /** Whether the app has "Display over other apps" permission for foreground lock enforcement. */
+  hasOverlayPermission: boolean;
   /** True while checking status. */
   isChecking: boolean;
   /** Open the system dialog to request Device Admin. */
   requestAdmin: () => Promise<void>;
+  /** Open the system settings screen to grant Overlay permission. */
+  requestOverlay: () => Promise<void>;
 }
 
 /**
- * Hook that manages Android Device Administrator status.
- *
- * - On Android native builds: checks and requests admin on mount, then
- *   re-checks every time the app comes back to the foreground.
- * - On iOS / Expo Go: all values are no-ops; isSupported is false.
+ * Hook that manages Android Device Administrator + Overlay permissions.
  */
 export function useDeviceAdmin(): DeviceAdminState {
   const [isActive, setIsActive] = useState(false);
+  const [hasOverlayPermission, setHasOverlayPermission] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
-  const hasMounted = useRef(false);
 
   const check = useCallback(async () => {
-    if (!DeviceAdmin.isSupported) {
+    try {
+      if (!DeviceAdmin.isSupported) {
+        setIsChecking(false);
+        return;
+      }
+      const [active, overlay] = await Promise.all([
+        DeviceAdmin.isDeviceAdminActive(),
+        DeviceAdmin.canDrawOverlays(),
+      ]);
+      setIsActive(Boolean(active));
+      setHasOverlayPermission(Boolean(overlay));
+    } catch {
+      setIsActive(false);
+      setHasOverlayPermission(false);
+    } finally {
       setIsChecking(false);
-      return;
     }
-    const active = await DeviceAdmin.isDeviceAdminActive();
-    setIsActive(active);
-    setIsChecking(false);
   }, []);
 
   // Check on mount and whenever the app comes back to foreground
   useEffect(() => {
-    check();
+    void check();
 
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') check();
+      if (state === 'active') void check();
     });
     return () => sub.remove();
   }, [check]);
 
-  // On first render (after check), if not active, request admin
-  useEffect(() => {
-    if (isChecking) return;
-    if (hasMounted.current) return;
-    hasMounted.current = true;
-
-    if (!isActive && DeviceAdmin.isSupported) {
-      DeviceAdmin.requestDeviceAdmin();
-    }
-  }, [isChecking, isActive]);
-
   const requestAdmin = useCallback(async () => {
-    await DeviceAdmin.requestDeviceAdmin();
+    try {
+      await DeviceAdmin.requestDeviceAdmin();
+    } catch {
+      // Ignore errors
+    }
+  }, []);
+
+  const requestOverlay = useCallback(async () => {
+    try {
+      await DeviceAdmin.requestOverlayPermission();
+    } catch {
+      // Ignore errors
+    }
   }, []);
 
   return {
     isSupported: DeviceAdmin.isSupported,
     isActive,
+    hasOverlayPermission,
     isChecking,
     requestAdmin,
+    requestOverlay,
   };
 }

@@ -65,6 +65,15 @@ export default defineConfig({
         '..',
         'attached_assets',
       ),
+      '@workspace/api-client-react': path.resolve(
+        import.meta.dirname,
+        '..',
+        '..',
+        'lib',
+        'api-client-react',
+        'src',
+        'index.ts',
+      ),
     },
     dedupe: ['react', 'react-dom'],
   },
@@ -81,6 +90,7 @@ export default defineConfig({
     proxy: localApiProxy,
     fs: {
       strict: true,
+      allow: [path.resolve(import.meta.dirname, '..', '..')],
     },
   },
   preview: {

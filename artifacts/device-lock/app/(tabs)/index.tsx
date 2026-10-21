@@ -1,36 +1,23 @@
 import React from 'react';
 import {
   ActivityIndicator,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { PaidStatusPill } from '@/components/PaidStatusPill';
 import { useColors } from '@/hooks/useColors';
+import { useSafeAreaPadding } from '@/hooks/useSafeAreaPadding';
 import { useLoan, LoanStatus } from '@/context/LoanContext';
-
-function formatCurrency(n: number): string {
-  return '$' + n.toLocaleString('es-MX', { minimumFractionDigits: 2 });
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('es-MX', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
-const METHOD_LABELS: Record<string, string> = {
-  cash: 'Efectivo',
-  transfer: 'Transferencia',
-  card: 'Tarjeta',
-};
+import {
+  formatCurrency,
+  formatShortDate,
+  PAYMENT_METHOD_META,
+} from '@/lib/formatters';
 
 function statusConfig(status: LoanStatus, days: number) {
   switch (status) {
@@ -54,7 +41,7 @@ function statusConfig(status: LoanStatus, days: number) {
 
 export default function HomeScreen() {
   const colors = useColors();
-  const insets = useSafeAreaInsets();
+  const { topPad, bottomPad } = useSafeAreaPadding();
   const { loan, payments, isLoading, daysUntilDue, progressPercent, openPaymentModal } = useLoan();
 
   if (isLoading) {
@@ -71,9 +58,6 @@ export default function HomeScreen() {
   const remaining = loan.totalAmount - loan.paidAmount;
   const daysOverdue = daysUntilDue < 0 ? Math.abs(daysUntilDue) : 0;
   const showPayBtn = loan.status === 'due_soon' || loan.status === 'overdue' || loan.status === 'locked';
-
-  const topPad = insets.top + (Platform.OS === 'web' ? 67 : 0);
-  const bottomPad = insets.bottom + (Platform.OS === 'web' ? 34 : 0);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -128,7 +112,7 @@ export default function HomeScreen() {
           <View style={[styles.heroBottom, { borderTopColor: colors.border }]}>
             <Ionicons name="calendar-outline" size={13} color={colors.mutedForeground} />
             <Text style={[styles.dueDateText, { color: colors.mutedForeground }]}>
-              Vencimiento: {formatDate(loan.nextDueDate)}
+              Vencimiento: {formatShortDate(loan.nextDueDate)}
             </Text>
           </View>
         </View>
@@ -205,12 +189,10 @@ export default function HomeScreen() {
                       {formatCurrency(p.amount)}
                     </Text>
                     <Text style={[styles.payDate, { color: colors.mutedForeground }]}>
-                      {formatDate(p.date)} · {METHOD_LABELS[p.method] ?? p.method}
+                      {formatShortDate(p.date)} · {PAYMENT_METHOD_META[p.method]?.label ?? p.method}
                     </Text>
                   </View>
-                  <View style={[styles.paidPill, { backgroundColor: 'rgba(48,209,88,0.12)' }]}>
-                    <Text style={styles.paidText}>Pagado</Text>
-                  </View>
+                  <PaidStatusPill />
                 </View>
                 {i < recent.length - 1 && (
                   <View style={[styles.sep, { backgroundColor: colors.border, marginLeft: 54 }]} />

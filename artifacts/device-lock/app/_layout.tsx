@@ -1,15 +1,14 @@
 import React, { useEffect } from 'react';
-import { Alert, AppState, Platform } from 'react-native';
+import { Alert, Platform, Text } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
 import * as SecureStore from 'expo-secure-store';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { LockScreen } from '@/components/LockScreen';
 import { PaymentModal } from '@/components/PaymentModal';
-import { LoanProvider, useLoan } from '@/context/LoanContext';
+import { CUSTOMER_SESSION_KEY, LoanProvider, useLoan } from '@/context/LoanContext';
 import { API_BASE_URL } from '@/lib/api-config';
 import { CustomerAccessScreen } from '@/components/CustomerAccessScreen';
 import { useDeviceAdmin } from '@/hooks/useDeviceAdmin';
@@ -23,40 +22,67 @@ import {
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 
-SplashScreen.preventAutoHideAsync();
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 const queryClient = new QueryClient();
-const CUSTOMER_SESSION_KEY = 'finjoy.customer.session';
 
 setBaseUrl(API_BASE_URL);
 setAuthTokenGetter(() => SecureStore.getItemAsync(CUSTOMER_SESSION_KEY));
 
 function AdminGuard() {
-  const { isSupported, isActive, isChecking, requestAdmin } = useDeviceAdmin();
+  const {
+    isSupported,
+    isActive,
+    hasOverlayPermission,
+    isChecking,
+    requestAdmin,
+    requestOverlay,
+  } = useDeviceAdmin();
 
-  // Once we know the status, if admin is missing → prompt
   useEffect(() => {
-    if (!isSupported || isChecking || isActive) return;
+    if (!isSupported || isChecking) return;
 
-    // Small delay so the app finishes rendering before the system dialog appears
-    const t = setTimeout(() => {
-      Alert.alert(
-        'Activar protección del dispositivo',
-        'FinJoy necesita permisos de administrador para bloquear el dispositivo en caso de impago, según el contrato de crédito firmado.',
-        [
-          {
-            text: 'Activar',
-            onPress: requestAdmin,
-          },
-          {
-            text: 'Más tarde',
-            style: 'cancel',
-          },
-        ]
-      );
-    }, 800);
-    return () => clearTimeout(t);
-  }, [isSupported, isActive, isChecking, requestAdmin]);
+    if (!isActive) {
+      const t = setTimeout(() => {
+        Alert.alert(
+          'Permiso obligatorio de Administrador',
+          'Para usar el dispositivo financiado con FinJoy es obligatorio activar el permiso de Administrador del Dispositivo.',
+          [
+            {
+              text: 'Activar ahora',
+              onPress: requestAdmin,
+            },
+          ],
+          { cancelable: false },
+        );
+      }, 600);
+      return () => clearTimeout(t);
+    }
+
+    if (!hasOverlayPermission) {
+      const t = setTimeout(() => {
+        Alert.alert(
+          'Permiso obligatorio de Superposición',
+          'Activa "Mostrar sobre otras aplicaciones" para completar la vinculación de seguridad de FinJoy.',
+          [
+            {
+              text: 'Configurar permiso',
+              onPress: requestOverlay,
+            },
+          ],
+          { cancelable: false },
+        );
+      }, 600);
+      return () => clearTimeout(t);
+    }
+  }, [
+    isSupported,
+    isActive,
+    hasOverlayPermission,
+    isChecking,
+    requestAdmin,
+    requestOverlay,
+  ]);
 
   return null;
 }
@@ -99,7 +125,7 @@ function RootLayoutNav() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       </Stack>
       <LockScreen visible={isDeviceLocked} />
-      <PaymentModal />
+      {!isDeviceLocked && <PaymentModal />}
       {/* Only runs on Android native builds; no-op on iOS/Expo Go */}
       {Platform.OS === 'android' && <AdminGuard />}
     </>
@@ -116,25 +142,23 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
+      SplashScreen.hideAsync().catch(() => {});
     }
   }, [fontsLoaded, fontError]);
 
   if (!fontsLoaded && !fontError) return null;
 
   return (
-    <SafeAreaProvider>
-      <ErrorBoundary>
+    <ErrorBoundary>
+      <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <LoanProvider>
             <GestureHandlerRootView style={{ flex: 1 }}>
-              <KeyboardProvider>
-                <RootLayoutNav />
-              </KeyboardProvider>
+              <RootLayoutNav />
             </GestureHandlerRootView>
           </LoanProvider>
         </QueryClientProvider>
-      </ErrorBoundary>
-    </SafeAreaProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }

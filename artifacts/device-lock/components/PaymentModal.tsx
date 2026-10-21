@@ -16,12 +16,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
 import { useLoan, PaymentMethod } from '@/context/LoanContext';
+import { formatCurrency, PAYMENT_METHOD_META } from '@/lib/formatters';
 
-const METHODS: { key: PaymentMethod; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { key: 'transfer', label: 'Transferencia', icon: 'swap-horizontal' },
-  { key: 'cash', label: 'Efectivo', icon: 'cash' },
-  { key: 'card', label: 'Tarjeta', icon: 'card' },
-];
+const METHOD_KEYS: PaymentMethod[] = ['transfer', 'cash', 'card'];
 
 export function PaymentModal() {
   const colors = useColors();
@@ -116,7 +113,7 @@ export function PaymentModal() {
                     MONTO A PAGAR
                   </Text>
                   <Text style={[styles.amountValue, { color: colors.foreground }]}>
-                    ${amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                    {formatCurrency(amount)}
                   </Text>
                   <Text style={[styles.amountSub, { color: colors.mutedForeground }]}>
                     Cuota mensual · {loan?.paidMonths != null ? `Mes ${loan.paidMonths + 1} de ${loan.totalMonths}` : '—'}
@@ -128,11 +125,12 @@ export function PaymentModal() {
                   MÉTODO DE PAGO
                 </Text>
                 <View style={styles.methodRow}>
-                  {METHODS.map(m => {
-                    const active = method === m.key;
+                  {METHOD_KEYS.map(key => {
+                    const m = PAYMENT_METHOD_META[key];
+                    const active = method === key;
                     return (
                       <TouchableOpacity
-                        key={m.key}
+                        key={key}
                         style={[
                           styles.methodBtn,
                           {
@@ -141,7 +139,7 @@ export function PaymentModal() {
                           },
                         ]}
                         onPress={() => {
-                          setMethod(m.key);
+                          setMethod(key);
                           Haptics.selectionAsync();
                         }}
                         activeOpacity={0.75}

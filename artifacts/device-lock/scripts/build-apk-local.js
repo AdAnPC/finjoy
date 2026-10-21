@@ -107,8 +107,14 @@ console.log("FinJoy: preparando compilacion Android local...");
 configureJava();
 configureAndroidSdk();
 
-console.log("\n[1/3] Instalando las dependencias del proyecto...");
-run("npx", ["--yes", "pnpm@10.26.1", "install", "--frozen-lockfile"]);
+if (!fs.existsSync(path.join(workspaceRoot, "node_modules"))) {
+  console.log("\n[1/3] Instalando las dependencias del proyecto...");
+  run("npx", ["--yes", "pnpm@10.26.1", "install"], {
+    env: { ...process.env, CI: "true" },
+  });
+} else {
+  console.log("\n[1/3] Dependencias ya instaladas en node_modules.");
+}
 
 const androidDir = path.join(projectRoot, "android");
 if (!fs.existsSync(androidDir)) {

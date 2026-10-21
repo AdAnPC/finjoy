@@ -1,4 +1,4 @@
-import { createHash, randomInt } from "node:crypto";
+import { randomInt } from "node:crypto";
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
 import {
@@ -7,19 +7,16 @@ import {
   customerSessionsTable,
   db,
 } from "@workspace/db";
+import { parsePositiveIntParam, sha256Hex } from "../../lib/http";
 
 const router: IRouter = Router();
-const activationAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const activationCodeLifetimeMs = 24 * 60 * 60 * 1000;
+const ACTIVATION_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const ACTIVATION_CODE_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
 router.post("/admin/clients/:id/activation-code", async (req, res): Promise<void> => {
-  const clientId = Number(req.params.id);
+  const clientId = parsePositiveIntParam(req.params.id);
   const body = req.body as { confirmReset?: unknown } | undefined;
-  if (
-    !Number.isSafeInteger(clientId) ||
-    clientId < 1 ||
-    typeof body?.confirmReset !== "boolean"
-  ) {
+  if (!clientId || typeof body?.confirmReset !== "boolean") {
     res.status(400).json({ error: "Datos de activación inválidos" });
     return;
   }
@@ -48,29 +45,28 @@ router.post("/admin/clients/:id/activation-code", async (req, res): Promise<void
     }
 
     const code = createActivationCode();
-    const expiresAt = new Date(Date.now() + activationCodeLifetimeMs);
-    const activationCodeHash = hashToken(code);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + ACTIVATION_CODE_LIFETIME_MS);
+    const activationCodeHash = sha256Hex(code);
+
+    const accountFields = {
+      activationCodeHash,
+      activationCodeExpiresAt: expiresAt,
+      passwordHash: null,
+      activatedAt: null,
+      updatedAt: now,
+    };
 
     await db.transaction(async (tx) => {
       await tx
         .insert(clientAccountsTable)
         .values({
           clientId,
-          activationCodeHash,
-          activationCodeExpiresAt: expiresAt,
-          passwordHash: null,
-          activatedAt: null,
-          updatedAt: new Date(),
+          ...accountFields,
         })
         .onConflictDoUpdate({
           target: clientAccountsTable.clientId,
-          set: {
-            activationCodeHash,
-            activationCodeExpiresAt: expiresAt,
-            passwordHash: null,
-            activatedAt: null,
-            updatedAt: new Date(),
-          },
+          set: accountFields,
         });
       await tx
         .delete(customerSessionsTable)
@@ -87,13 +83,9 @@ router.post("/admin/clients/:id/activation-code", async (req, res): Promise<void
 function createActivationCode(): string {
   let result = "";
   for (let index = 0; index < 10; index += 1) {
-    result += activationAlphabet[randomInt(activationAlphabet.length)];
+    result += ACTIVATION_ALPHABET[randomInt(ACTIVATION_ALPHABET.length)];
   }
   return result;
-}
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
 }
 
 export default router;

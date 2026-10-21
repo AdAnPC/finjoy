@@ -1,30 +1,18 @@
 import React from 'react';
 import {
   Alert,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
+import { useSafeAreaPadding } from '@/hooks/useSafeAreaPadding';
 import { useLoan, LoanStatus } from '@/context/LoanContext';
-
-function formatCurrency(n: number): string {
-  return '$' + n.toLocaleString('es-MX', { minimumFractionDigits: 2 });
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('es-MX', {
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-  });
-}
+import { formatCurrency, formatLongDate, getInitials } from '@/lib/formatters';
 
 interface DemoButtonProps {
   icon: keyof typeof Ionicons.glyphMap;
@@ -51,20 +39,12 @@ function DemoButton({ icon, label, accentColor, onPress }: DemoButtonProps) {
 
 export default function AccountScreen() {
   const colors = useColors();
-  const insets = useSafeAreaInsets();
+  const { topPad, bottomPad } = useSafeAreaPadding();
   const { loan, setLoanStatus, resetDemo } = useLoan();
-
-  const topPad = insets.top + (Platform.OS === 'web' ? 67 : 0);
-  const bottomPad = insets.bottom + (Platform.OS === 'web' ? 34 : 0);
 
   if (!loan) return null;
 
-  const initials = loan.clientName
-    .split(' ')
-    .map(n => n[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
+  const initials = getInitials(loan.clientName);
   const remaining = loan.totalAmount - loan.paidAmount;
 
   const simulate = (status: LoanStatus) => {
@@ -122,7 +102,7 @@ export default function AccountScreen() {
           { label: 'Saldo restante', value: formatCurrency(remaining) },
           { label: 'Cuota mensual', value: formatCurrency(loan.monthlyPayment) },
           { label: 'Meses completados', value: `${loan.paidMonths} de ${loan.totalMonths}` },
-          { label: 'Fecha de inicio', value: formatDate(loan.startDate) },
+          { label: 'Fecha de inicio', value: formatLongDate(loan.startDate) },
         ].map((row, i, arr) => (
           <View key={row.label}>
             <View style={styles.detailRow}>

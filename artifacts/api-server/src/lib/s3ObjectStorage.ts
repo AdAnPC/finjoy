@@ -10,6 +10,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import {
+  buildApkDownloadResponse,
   ObjectNotFoundError,
   ObjectStorageConfigurationError,
   type ApkObjectMetadata,
@@ -142,17 +143,7 @@ export class S3ObjectStorageService implements ApkStorageProvider {
   }
 
   async downloadObject(file: ApkStoredFile, cacheTtlSec = 300): Promise<Response> {
-    const [metadata] = await file.getMetadata();
-    const webStream = Readable.toWeb(
-      file.createReadStream() as Readable,
-    ) as ReadableStream<Uint8Array>;
-    const headers: Record<string, string> = {
-      "Content-Type": metadata.contentType ?? "application/octet-stream",
-      "Cache-Control": `private, max-age=${cacheTtlSec}`,
-      "Content-Disposition": 'attachment; filename="finjoy.apk"',
-    };
-    if (metadata.size) headers["Content-Length"] = String(metadata.size);
-    return new Response(webStream, { headers });
+    return buildApkDownloadResponse(file, cacheTtlSec);
   }
 
   private getObjectKey(objectPath: string): string {

@@ -1,30 +1,57 @@
 import React, { useEffect, useRef } from 'react';
 import {
   Animated,
-  Linking,
+  AppState,
+  BackHandler,
   Modal,
-  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { lockDeviceNow, setKioskLockEnabled } from 'expo-device-admin';
+import { PaymentModal } from '@/components/PaymentModal';
 import { useLoan } from '@/context/LoanContext';
+import { useSafeAreaPadding } from '@/hooks/useSafeAreaPadding';
+import { formatCurrency } from '@/lib/formatters';
 
 interface Props {
   visible: boolean;
 }
 
 export function LockScreen({ visible }: Props) {
-  const insets = useSafeAreaInsets();
-  const { loan, daysUntilDue, openPaymentModal } = useLoan();
+  const { topPad, bottomPad } = useSafeAreaPadding();
+  const { loan, daysUntilDue, openPaymentModal, refreshAccount } = useLoan();
 
   const fadeIn = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(1)).current;
   const glow = useRef(new Animated.Value(0.25)).current;
+
+  useEffect(() => {
+    void setKioskLockEnabled(visible);
+    if (!visible) return;
+
+    const backSubscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      () => true,
+    );
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'background') {
+        void setKioskLockEnabled(true);
+        void lockDeviceNow();
+      } else if (state === 'active') {
+        void setKioskLockEnabled(true);
+        void refreshAccount();
+      }
+    });
+
+    return () => {
+      backSubscription.remove();
+      appStateSubscription.remove();
+    };
+  }, [visible, refreshAccount]);
 
   useEffect(() => {
     if (!visible) {
@@ -56,16 +83,15 @@ export function LockScreen({ visible }: Props) {
   const isLocked = loan?.status === 'locked';
   const daysOverdue = daysUntilDue < 0 ? Math.abs(daysUntilDue) : 0;
   const alertColor = '#FF3B30';
-  const topPad = insets.top + (Platform.OS === 'web' ? 67 : 0);
-  const bottomPad = insets.bottom + (Platform.OS === 'web' ? 34 : 0);
 
   const handlePayNow = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     openPaymentModal();
   };
 
-  const handleCallSupport = () => {
-    Linking.openURL('tel:+525512345678').catch(() => {});
+  const handleCheckPayment = () => {
+    Haptics.selectionAsync();
+    void refreshAccount();
   };
 
   return (
@@ -75,6 +101,7 @@ export function LockScreen({ visible }: Props) {
       transparent={false}
       statusBarTranslucent
       hardwareAccelerated
+      onRequestClose={() => {}}
     >
       <Animated.View
         style={[
@@ -100,8 +127,10 @@ export function LockScreen({ visible }: Props) {
         <Text style={styles.mainTitle}>DISPOSITIVO BLOQUEADO</Text>
         <Text style={styles.subtitle}>
           {isLocked
-            ? 'Tu cuenta fue bloqueada por falta de pago'
-            : `Tu pago lleva ${daysOverdue} ${daysOverdue === 1 ? 'día' : 'días'} de atraso`}
+            ? 'Tu teléfono está totalmente bloqueado por falta de pago'
+            : daysOverdue === 0
+              ? 'Hoy es tu día de pago. Realiza tu pago para desbloquear el teléfono'
+              : `Tu pago lleva ${daysOverdue} ${daysOverdue === 1 ? 'día' : 'días'} de atraso`}
         </Text>
 
         {/* Info card */}
@@ -114,7 +143,7 @@ export function LockScreen({ visible }: Props) {
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Cuota pendiente</Text>
             <Text style={[styles.infoValue, styles.amountBig]}>
-              ${(loan?.monthlyPayment ?? 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+              {formatCurrency(loan?.monthlyPayment ?? 0)}
             </Text>
           </View>
           {daysOverdue > 0 && (
@@ -133,17 +162,18 @@ export function LockScreen({ visible }: Props) {
         {/* CTA */}
         <TouchableOpacity style={styles.payBtn} onPress={handlePayNow} activeOpacity={0.85}>
           <Ionicons name="card" size={20} color="#070C1A" />
-          <Text style={styles.payBtnText}>PAGAR AHORA</Text>
+          <Text style={styles.payBtnText}>PAGAR AHORA PARA DESBLOQUEAR</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.supportBtn} onPress={handleCallSupport} activeOpacity={0.7}>
-          <Ionicons name="call-outline" size={15} color="#5A6A8A" />
-          <Text style={styles.supportText}>Llamar a soporte</Text>
+        <TouchableOpacity style={styles.supportBtn} onPress={handleCheckPayment} activeOpacity={0.7}>
+          <Ionicons name="refresh-outline" size={16} color="#5A6A8A" />
+          <Text style={styles.supportText}>Ya pagué · Verificar desbloqueo</Text>
         </TouchableOpacity>
 
         <Text style={styles.footerNote}>
-          El acceso se restablece al confirmar tu pago
+          El teléfono permanecerá bloqueado hasta que se confirme tu pago
         </Text>
+        <PaymentModal />
       </Animated.View>
     </Modal>
   );

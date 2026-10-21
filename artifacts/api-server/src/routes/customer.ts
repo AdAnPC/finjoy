@@ -1,5 +1,4 @@
 import {
-  createHash,
   randomBytes,
   scrypt,
   timingSafeEqual,
@@ -15,6 +14,9 @@ import {
   loansTable,
   paymentsTable,
 } from "@workspace/db";
+import { readBearerToken, sha256Hex } from "../lib/http";
+import { computeAutomaticLoanStatus, syncSingleLoanStatus } from "../lib/loanStatus";
+import { getProtectionConfig } from "../lib/protectionConfig";
 
 const router: IRouter = Router();
 const scryptAsync = promisify(scrypt);
@@ -42,11 +44,11 @@ router.post("/customer/auth/activate", async (req, res): Promise<void> => {
   }
 
   try {
-    const codeHash = hashToken(body.code.replace(/[\s-]/g, "").toUpperCase());
+    const codeHash = sha256Hex(body.code.replace(/[\s-]/g, "").toUpperCase());
     const passwordHash = await hashPassword(body.password);
     const now = new Date();
     const token = createSessionToken();
-    const tokenHash = hashToken(token);
+    const tokenHash = sha256Hex(token);
     const expiresAt = new Date(Date.now() + SESSION_LIFETIME_MS);
 
     const clientId = await db.transaction(async (tx) => {
@@ -160,7 +162,7 @@ router.post("/customer/auth/login", async (req, res): Promise<void> => {
       );
     await db.insert(customerSessionsTable).values({
       clientId: matches[0].clientId,
-      tokenHash: hashToken(token),
+      tokenHash: sha256Hex(token),
       expiresAt,
     });
     res.json({ token, expiresAt: expiresAt.toISOString() });
@@ -197,14 +199,18 @@ router.get("/customer/account", async (req, res): Promise<void> => {
       .from(loansTable)
       .where(eq(loansTable.clientId, client.id))
       .orderBy(desc(loansTable.createdAt));
-    const loan = loans.find((candidate) => candidate.status !== "completed") ?? loans[0] ?? null;
-    const payments = loan
-      ? await db
-          .select()
-          .from(paymentsTable)
-          .where(eq(paymentsTable.loanId, loan.id))
-          .orderBy(desc(paymentsTable.date))
-      : [];
+    const candidateLoan = loans.find((candidate) => candidate.status !== "completed") ?? loans[0] ?? null;
+    const loan = candidateLoan ? await syncSingleLoanStatus(candidateLoan) : null;
+    const [payments, protection] = await Promise.all([
+      loan
+        ? db
+            .select()
+            .from(paymentsTable)
+            .where(eq(paymentsTable.loanId, loan.id))
+            .orderBy(desc(paymentsTable.date))
+        : Promise.resolve([]),
+      getProtectionConfig(),
+    ]);
 
     res.json({
       client,
@@ -231,10 +237,112 @@ router.get("/customer/account", async (req, res): Promise<void> => {
         reference: payment.reference,
         status: payment.status,
       })),
+      protection: {
+        frpAccountIds: protection.frpAccountIds,
+      },
     });
   } catch (error) {
     req.log.error({ err: error }, "Failed to load customer account");
     res.status(500).json({ error: "No se pudo cargar la cuenta" });
+  }
+});
+
+router.post("/customer/payments", async (req, res): Promise<void> => {
+  try {
+    const session = await getCustomerSession(req);
+    if (!session) {
+      res.status(401).json({ error: "Inicia sesión para realizar un pago" });
+      return;
+    }
+
+    const body = req.body as { amount?: unknown; method?: unknown } | undefined;
+    const amount = Number(body?.amount);
+    const method =
+      body?.method === "cash" || body?.method === "transfer" || body?.method === "card"
+        ? body.method
+        : null;
+
+    if (!Number.isFinite(amount) || amount <= 0 || !method) {
+      res.status(400).json({ error: "Datos de pago inválidos" });
+      return;
+    }
+
+    const reference = `APP-${Date.now().toString().slice(-8)}`;
+    const now = new Date();
+
+    const result = await db.transaction(async (tx) => {
+      const loans = await tx
+        .select()
+        .from(loansTable)
+        .where(eq(loansTable.clientId, session.clientId))
+        .orderBy(desc(loansTable.createdAt));
+
+      const loan = loans.find((candidate) => candidate.status !== "completed") ?? loans[0];
+      if (!loan) return null;
+
+      const [createdPayment] = await tx
+        .insert(paymentsTable)
+        .values({
+          loanId: loan.id,
+          amount: String(amount),
+          date: now,
+          method,
+          reference,
+          status: "completed",
+          notes: "Pago desde la APK FinJoy",
+        })
+        .returning();
+
+      const newPaidAmount = Number(loan.paidAmount) + amount;
+      const newPaidMonths = loan.paidMonths + 1;
+      const nextDue = new Date(loan.nextDueDate);
+      nextDue.setMonth(nextDue.getMonth() + 1);
+      while (nextDue <= now) {
+        nextDue.setMonth(nextDue.getMonth() + 1);
+      }
+
+      const newStatus = computeAutomaticLoanStatus(
+        {
+          status: "active",
+          nextDueDate: nextDue,
+          gracePeriodDays: loan.gracePeriodDays,
+          paidAmount: String(newPaidAmount),
+          totalAmount: loan.totalAmount,
+          paidMonths: newPaidMonths,
+          totalMonths: loan.totalMonths,
+        },
+        now,
+      );
+
+      await tx
+        .update(loansTable)
+        .set({
+          paidAmount: String(newPaidAmount),
+          paidMonths: newPaidMonths,
+          nextDueDate: nextDue,
+          status: newStatus,
+        })
+        .where(eq(loansTable.id, loan.id));
+
+      return createdPayment;
+    });
+
+    if (!result) {
+      res.status(404).json({ error: "No se encontró un préstamo activo" });
+      return;
+    }
+
+    res.status(201).json({
+      id: result.id,
+      amount: Number(result.amount),
+      date: result.date.toISOString(),
+      method: result.method,
+      reference: result.reference,
+      status: result.status,
+    });
+  } catch (error) {
+    req.log.error({ err: error }, "Failed to record customer payment");
+    res.status(500).json({ error: "No se pudo procesar el pago" });
   }
 });
 
@@ -244,7 +352,7 @@ router.post("/customer/auth/logout", async (req, res): Promise<void> => {
     if (token) {
       await db
         .delete(customerSessionsTable)
-        .where(eq(customerSessionsTable.tokenHash, hashToken(token)));
+        .where(eq(customerSessionsTable.tokenHash, sha256Hex(token)));
     }
     res.status(204).send();
   } catch (error) {
@@ -264,7 +372,7 @@ async function getCustomerSession(req: Request) {
     .from(customerSessionsTable)
     .where(
       and(
-        eq(customerSessionsTable.tokenHash, hashToken(token)),
+        eq(customerSessionsTable.tokenHash, sha256Hex(token)),
         gt(customerSessionsTable.expiresAt, new Date()),
       ),
     )
@@ -272,18 +380,8 @@ async function getCustomerSession(req: Request) {
   return session ?? null;
 }
 
-function readBearerToken(req: { header(name: string): string | undefined }): string | null {
-  const authorization = req.header("authorization");
-  if (!authorization?.startsWith("Bearer ")) return null;
-  return authorization.slice("Bearer ".length).trim() || null;
-}
-
 function createSessionToken(): string {
   return randomBytes(32).toString("base64url");
-}
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
 }
 
 function normalizePhone(phone: string): string {

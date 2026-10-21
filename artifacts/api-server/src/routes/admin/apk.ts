@@ -1,12 +1,22 @@
-import { createHash } from "node:crypto";
-import { Router, type IRouter } from "express";
+import fs from "node:fs";
+import path from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { Router, type IRouter, type Response } from "express";
 import { asc, desc, eq } from "drizzle-orm";
 import { db, apkVersionsTable } from "@workspace/db";
 import {
   getApkStorageProvider,
+  getLocalApkUploadDir,
   ObjectNotFoundError,
   ObjectStorageConfigurationError,
 } from "../../lib/apkStorage";
+import { parsePositiveIntParam, sha256Hex } from "../../lib/http";
+import {
+  getProtectionConfig,
+  saveProtectionConfig,
+} from "../../lib/protectionConfig";
+import { serializeApkVersion } from "../../lib/serializers";
 
 const router: IRouter = Router();
 const MAX_APK_BYTES = 100 * 1024 * 1024;
@@ -15,14 +25,7 @@ const APK_CONTENT_TYPES = new Set([
   "application/octet-stream",
 ]);
 const VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
-
-function serializeVersion(version: typeof apkVersionsTable.$inferSelect) {
-  return {
-    ...version,
-    createdAt: version.createdAt.toISOString(),
-    publishedAt: version.publishedAt?.toISOString() ?? null,
-  };
-}
+const ZIP_MAGIC_HEADER = 0x04034b50;
 
 async function getDistribution() {
   const versions = await db
@@ -32,8 +35,8 @@ async function getDistribution() {
   const active = versions.find((version) => version.status === "active");
   return {
     available: Boolean(active),
-    current: active ? serializeVersion(active) : null,
-    versions: versions.map(serializeVersion),
+    current: active ? serializeApkVersion(active) : null,
+    versions: versions.map(serializeApkVersion),
   };
 }
 
@@ -67,6 +70,23 @@ function isUploadPath(objectPath: string): boolean {
   );
 }
 
+function respondStorageError(
+  res: Response,
+  error: unknown,
+  fallbackMessage: string,
+  notFoundOption?: { status: number; message: string },
+): void {
+  if (error instanceof ObjectNotFoundError && notFoundOption) {
+    res.status(notFoundOption.status).json({ error: notFoundOption.message });
+    return;
+  }
+  if (error instanceof ObjectStorageConfigurationError) {
+    res.status(503).json({ error: "El almacenamiento de APK no está configurado" });
+    return;
+  }
+  res.status(500).json({ error: fallbackMessage });
+}
+
 router.get("/admin/apk", async (req, res): Promise<void> => {
   try {
     res.json(await getDistribution());
@@ -94,24 +114,44 @@ router.get("/admin/apk/download", async (req, res): Promise<void> => {
     res.status(response.status);
     response.headers.forEach((value, key) => res.setHeader(key, value));
     if (response.body) {
-      const stream = (await import("node:stream")).Readable.fromWeb(
-        response.body as ReadableStream<Uint8Array>,
-      );
-      stream.pipe(res);
+      Readable.fromWeb(response.body as ReadableStream<Uint8Array>).pipe(res);
     } else {
       res.end();
     }
   } catch (error) {
     req.log.error({ err: error }, "Failed to download active APK");
-    if (error instanceof ObjectNotFoundError) {
-      res.status(404).json({ error: "The published APK object no longer exists" });
-      return;
-    }
-    if (error instanceof ObjectStorageConfigurationError) {
-      res.status(503).json({ error: "El almacenamiento de APK no está configurado" });
-      return;
-    }
-    res.status(500).json({ error: "No se pudo descargar la APK" });
+    respondStorageError(res, error, "No se pudo descargar la APK", {
+      status: 404,
+      message: "The published APK object no longer exists",
+    });
+  }
+});
+
+router.put("/admin/apk/upload-file/:uploadId", async (req, res): Promise<void> => {
+  const uploadId = req.params.uploadId;
+  if (!uploadId || !/^[A-Za-z0-9-]+$/.test(uploadId)) {
+    res.status(400).json({ error: "Upload ID inválido" });
+    return;
+  }
+  try {
+    const uploadDir = getLocalApkUploadDir();
+    const filePath = path.join(uploadDir, `${uploadId}.apk`);
+    const metaPath = path.join(uploadDir, `${uploadId}.json`);
+
+    const contentType =
+      req.headers["content-type"] || "application/vnd.android.package-archive";
+    await fs.promises.writeFile(
+      metaPath,
+      JSON.stringify({ contentType }),
+      "utf8",
+    );
+
+    const writeStream = fs.createWriteStream(filePath);
+    await pipeline(req, writeStream);
+    res.status(200).send("OK");
+  } catch (error) {
+    req.log.error({ err: error }, "Failed to save uploaded APK file");
+    res.status(500).json({ error: "Error al guardar el archivo de la APK" });
   }
 });
 
@@ -125,22 +165,14 @@ router.post("/admin/apk/upload-url", async (req, res): Promise<void> => {
     res.json({ ...uploadTarget, version: req.body.version });
   } catch (error) {
     req.log.error({ err: error }, "Failed to create APK upload URL");
-    if (error instanceof ObjectStorageConfigurationError) {
-      res.status(503).json({ error: "El almacenamiento de APK no está configurado" });
-      return;
-    }
-    res.status(500).json({ error: "No se pudo preparar la subida" });
+    respondStorageError(res, error, "No se pudo preparar la subida");
   }
 });
 
 router.post("/admin/apk/versions", async (req, res): Promise<void> => {
   const body = req.body as Record<string, unknown> | undefined;
   const objectPath = typeof body?.objectPath === "string" ? body.objectPath : null;
-  if (
-    !isValidUploadMetadata(body) ||
-    !objectPath ||
-    !isUploadPath(objectPath)
-  ) {
+  if (!isValidUploadMetadata(body) || !objectPath || !isUploadPath(objectPath)) {
     res.status(400).json({ error: "Datos de subida de APK inválidos" });
     return;
   }
@@ -157,28 +189,34 @@ router.post("/admin/apk/versions", async (req, res): Promise<void> => {
     }
 
     const file = await getApkStorageProvider().getObjectEntityFile(objectPath);
+    const cleanupInvalidFile = async () => {
+      await file
+        .delete()
+        .catch((error) => req.log.warn({ err: error }, "Failed to clean invalid APK"));
+    };
+
     const [metadata] = await file.getMetadata();
     const actualSize = Number(metadata.size ?? 0);
     const actualType = String(metadata.contentType ?? "");
     if (actualSize !== body.size || actualSize > MAX_APK_BYTES) {
-      await file.delete().catch((error) => req.log.warn({ err: error }, "Failed to clean invalid APK"));
+      await cleanupInvalidFile();
       res.status(400).json({ error: "El tamaño del archivo no coincide o excede el límite" });
       return;
     }
     if (!APK_CONTENT_TYPES.has(actualType)) {
-      await file.delete().catch((error) => req.log.warn({ err: error }, "Failed to clean invalid APK"));
+      await cleanupInvalidFile();
       res.status(400).json({ error: "El tipo MIME del objeto no es una APK válida" });
       return;
     }
 
     const [bytes] = await file.download();
-    if (bytes.length < 4 || bytes.readUInt32LE(0) !== 0x04034b50) {
-      await file.delete().catch((error) => req.log.warn({ err: error }, "Failed to clean invalid APK"));
+    if (bytes.length < 4 || bytes.readUInt32LE(0) !== ZIP_MAGIC_HEADER) {
+      await cleanupInvalidFile();
       res.status(400).json({ error: "El archivo no tiene una firma APK/ZIP válida" });
       return;
     }
 
-    const checksum = createHash("sha256").update(bytes).digest("hex");
+    const checksum = sha256Hex(bytes);
     const [version] = await db
       .insert(apkVersionsTable)
       .values({
@@ -191,24 +229,19 @@ router.post("/admin/apk/versions", async (req, res): Promise<void> => {
         status: "pending",
       })
       .returning();
-    res.status(201).json(serializeVersion(version));
+    res.status(201).json(serializeApkVersion(version));
   } catch (error) {
     req.log.error({ err: error }, "Failed to register APK version");
-    if (error instanceof ObjectNotFoundError) {
-      res.status(404).json({ error: "La APK subida no existe o expiró" });
-      return;
-    }
-    if (error instanceof ObjectStorageConfigurationError) {
-      res.status(503).json({ error: "El almacenamiento de APK no está configurado" });
-      return;
-    }
-    res.status(500).json({ error: "No se pudo validar la APK" });
+    respondStorageError(res, error, "No se pudo validar la APK", {
+      status: 404,
+      message: "La APK subida no existe o expiró",
+    });
   }
 });
 
 router.post("/admin/apk/versions/:id/activate", async (req, res): Promise<void> => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id < 1) {
+  const id = parsePositiveIntParam(req.params.id);
+  if (!id) {
     res.status(400).json({ error: "Identificador de versión inválido" });
     return;
   }
@@ -246,15 +279,45 @@ router.post("/admin/apk/versions/:id/activate", async (req, res): Promise<void> 
     res.json(await getDistribution());
   } catch (error) {
     req.log.error({ err: error }, "Failed to activate APK version");
-    if (error instanceof ObjectNotFoundError) {
-      res.status(409).json({ error: "La APK de esta versión ya no existe en almacenamiento" });
-      return;
-    }
-    if (error instanceof ObjectStorageConfigurationError) {
-      res.status(503).json({ error: "El almacenamiento de APK no está configurado" });
-      return;
-    }
-    res.status(500).json({ error: "No se pudo activar la versión" });
+    respondStorageError(res, error, "No se pudo activar la versión", {
+      status: 409,
+      message: "La APK de esta versión ya no existe en almacenamiento",
+    });
+  }
+});
+
+router.get("/admin/apk/protection-config", async (req, res): Promise<void> => {
+  try {
+    res.json(await getProtectionConfig());
+  } catch (error) {
+    req.log.error({ err: error }, "Failed to read device protection config");
+    res.status(500).json({ error: "No se pudo leer la configuración de protección" });
+  }
+});
+
+router.put("/admin/apk/protection-config", async (req, res): Promise<void> => {
+  try {
+    const body = req.body as {
+      frpAccountIds?: unknown;
+      organizationName?: unknown;
+    } | undefined;
+    const frpAccountIds = Array.isArray(body?.frpAccountIds)
+      ? body.frpAccountIds
+          .map((item) => String(item).trim())
+          .filter(Boolean)
+      : undefined;
+    const organizationName =
+      typeof body?.organizationName === "string"
+        ? body.organizationName
+        : undefined;
+    const saved = await saveProtectionConfig({
+      frpAccountIds,
+      organizationName,
+    });
+    res.json(saved);
+  } catch (error) {
+    req.log.error({ err: error }, "Failed to update device protection config");
+    res.status(500).json({ error: "No se pudo guardar la configuración de protección" });
   }
 });
 

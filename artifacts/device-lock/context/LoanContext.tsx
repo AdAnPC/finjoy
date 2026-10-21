@@ -5,18 +5,33 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { AppState } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  getGetCustomerAccountQueryKey,
   useActivateCustomerAccount,
   useGetCustomerAccount,
   useLoginCustomer,
   useLogoutCustomer,
   type CustomerAccount,
 } from "@workspace/api-client-react";
-import { API_IS_CONFIGURED } from "@/lib/api-config";
+import {
+  lockDeviceNow,
+  setCreditProtectionEnabled,
+  setFrpAccounts,
+  setKioskLockEnabled,
+} from "expo-device-admin";
+import { API_BASE_URL, API_IS_CONFIGURED } from "@/lib/api-config";
+import {
+  applyDemoLoanStatus,
+  applyDemoPaymentToLoan,
+  buildDemoPayment,
+  buildInitialDemoLoan,
+  buildInitialDemoPayments,
+} from "@/lib/demo-data";
 
 export type LoanStatus = "active" | "due_soon" | "overdue" | "locked" | "completed";
 export type PaymentMethod = "cash" | "transfer" | "card";
@@ -56,6 +71,10 @@ interface LoanContextType {
   isPaymentModalOpen: boolean;
   openPaymentModal: () => void;
   closePaymentModal: () => void;
+  makePay: (amount: number, method: PaymentMethod) => Promise<void>;
+  setLoanStatus: (status: LoanStatus) => void;
+  resetDemo: () => void;
+  enterDemoMode: () => void;
   login: (phone: string, password: string) => Promise<void>;
   activate: (code: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -68,7 +87,9 @@ interface LoanContextType {
 }
 
 const LoanContext = createContext<LoanContextType | null>(null);
-const SESSION_KEY = "finjoy.customer.session";
+export const CUSTOMER_SESSION_KEY = "finjoy.customer.session";
+const SESSION_KEY = CUSTOMER_SESSION_KEY;
+const CACHED_ACCOUNT_KEY = "finjoy.customer.cached_account";
 
 function daysUntilDate(dateStr: string): number {
   const now = new Date();
@@ -76,6 +97,28 @@ function daysUntilDate(dateStr: string): number {
   const due = new Date(dateStr);
   due.setHours(0, 0, 0, 0);
   return Math.round((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * Evaluates due-date rules locally on the device so that even if the user
+ * disables Wi-Fi and mobile data before the payment date, the APK still
+ * transitions to "overdue" / "locked" automatically when the date arrives.
+ */
+function resolveEffectiveLoanStatus(loan: Loan, daysUntilDue: number): LoanStatus {
+  if (loan.status === "completed" || loan.status === "locked") {
+    return loan.status;
+  }
+  const daysOverdue = -daysUntilDue;
+  if (daysOverdue > loan.gracePeriodDays) {
+    return "locked";
+  }
+  if (daysOverdue >= 0) {
+    return loan.gracePeriodDays <= 0 ? "locked" : "overdue";
+  }
+  if (daysUntilDue <= 3) {
+    return "due_soon";
+  }
+  return loan.status;
 }
 
 function accountErrorStatus(error: unknown): number | undefined {
@@ -121,24 +164,55 @@ function mapAccount(account: CustomerAccount) {
 export function LoanProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
   const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [cachedAccount, setCachedAccount] = useState<CustomerAccount | null>(null);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(!API_IS_CONFIGURED);
+  const [demoLoan, setDemoLoan] = useState<Loan>(() => buildInitialDemoLoan());
+  const [demoPayments, setDemoPayments] = useState<Payment[]>(() => buildInitialDemoPayments());
+  const [, setClockTick] = useState(0);
+  const wasLockedRef = useRef(false);
+
   const activateMutation = useActivateCustomerAccount();
   const loginMutation = useLoginCustomer();
   const logoutMutation = useLogoutCustomer();
   const accountQuery = useGetCustomerAccount({
     query: {
-      enabled: Boolean(sessionToken) && API_IS_CONFIGURED,
+      queryKey: getGetCustomerAccountQueryKey(),
+      enabled: Boolean(sessionToken) && API_IS_CONFIGURED && !isDemoMode,
       retry: false,
       refetchInterval: 60_000,
     },
   });
 
   useEffect(() => {
+    const interval = setInterval(() => {
+      setClockTick((tick) => tick + 1);
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
-    void SecureStore.getItemAsync(SESSION_KEY)
-      .then((token) => {
-        if (!cancelled) setSessionToken(token);
+    void Promise.all([
+      SecureStore.getItemAsync(SESSION_KEY),
+      SecureStore.getItemAsync(CACHED_ACCOUNT_KEY),
+    ])
+      .then(([token, rawCachedAccount]) => {
+        if (cancelled) return;
+        if (rawCachedAccount) {
+          try {
+            setCachedAccount(JSON.parse(rawCachedAccount) as CustomerAccount);
+          } catch {
+            // Ignore malformed cache
+          }
+        }
+        if (token) {
+          setSessionToken(token);
+          if (API_IS_CONFIGURED) {
+            setIsDemoMode(false);
+          }
+        }
       })
       .catch(() => {
         if (!cancelled) setSessionToken(null);
@@ -152,25 +226,37 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!accountQuery.data) return;
+    setCachedAccount(accountQuery.data);
+    void SecureStore.setItemAsync(
+      CACHED_ACCOUNT_KEY,
+      JSON.stringify(accountQuery.data),
+    ).catch(() => undefined);
+  }, [accountQuery.data]);
+
+  useEffect(() => {
     if (accountErrorStatus(accountQuery.error) !== 401 || !sessionToken) return;
     void SecureStore.deleteItemAsync(SESSION_KEY).catch(() => undefined);
+    void SecureStore.deleteItemAsync(CACHED_ACCOUNT_KEY).catch(() => undefined);
     setSessionToken(null);
+    setCachedAccount(null);
     queryClient.removeQueries({ queryKey: accountQuery.queryKey });
   }, [accountQuery.error, accountQuery.queryKey, queryClient, sessionToken]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active" && sessionToken && API_IS_CONFIGURED) {
+      if (state === "active" && sessionToken && API_IS_CONFIGURED && !isDemoMode) {
         void accountQuery.refetch();
       }
     });
     return () => subscription.remove();
-  }, [accountQuery.refetch, sessionToken]);
+  }, [accountQuery.refetch, sessionToken, isDemoMode]);
 
   const saveSession = useCallback(
     async (token: string) => {
       await SecureStore.setItemAsync(SESSION_KEY, token);
       setSessionToken(token);
+      setIsDemoMode(false);
       await queryClient.invalidateQueries();
     },
     [queryClient],
@@ -204,52 +290,143 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      if (sessionToken) await logoutMutation.mutateAsync();
+      if (sessionToken && !isDemoMode) await logoutMutation.mutateAsync();
     } catch {
       // Clear the local session even when the network is unavailable.
     } finally {
       await SecureStore.deleteItemAsync(SESSION_KEY).catch(() => undefined);
+      await SecureStore.deleteItemAsync(CACHED_ACCOUNT_KEY).catch(() => undefined);
       setSessionToken(null);
+      setCachedAccount(null);
+      setIsDemoMode(false);
       queryClient.clear();
     }
-  }, [logoutMutation, queryClient, sessionToken]);
+  }, [logoutMutation, queryClient, sessionToken, isDemoMode]);
 
   const refreshAccount = useCallback(async () => {
-    if (sessionToken && API_IS_CONFIGURED) {
+    if (sessionToken && API_IS_CONFIGURED && !isDemoMode) {
       await accountQuery.refetch();
     }
-  }, [accountQuery.refetch, sessionToken]);
+  }, [accountQuery.refetch, sessionToken, isDemoMode]);
 
-  const currentAccount = accountQuery.data ? mapAccount(accountQuery.data) : null;
-  const loan = currentAccount?.loan ?? null;
-  const daysUntilDue = loan ? daysUntilDate(loan.nextDueDate) : 0;
+  const setLoanStatus = useCallback((status: LoanStatus) => {
+    setIsDemoMode(true);
+    setDemoLoan((prev) => applyDemoLoanStatus(prev, status));
+  }, []);
+
+  const resetDemo = useCallback(() => {
+    setIsDemoMode(true);
+    setDemoLoan(buildInitialDemoLoan());
+    setDemoPayments(buildInitialDemoPayments());
+  }, []);
+
+  const enterDemoMode = useCallback(() => {
+    setIsDemoMode(true);
+  }, []);
+
+  const makePay = useCallback(
+    async (amount: number, method: PaymentMethod) => {
+      if (isDemoMode || !API_IS_CONFIGURED || !sessionToken) {
+        const newPayment = buildDemoPayment(amount, method);
+        setDemoPayments((prev) => [newPayment, ...prev]);
+        setDemoLoan((prev) => applyDemoPaymentToLoan(prev, amount));
+        return;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/customer/payments`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionToken}`,
+        },
+        body: JSON.stringify({ amount, method }),
+      });
+
+      if (!response.ok) {
+        throw new Error("No se pudo procesar el pago.");
+      }
+
+      await accountQuery.refetch();
+    },
+    [accountQuery, isDemoMode, sessionToken],
+  );
+
+  const activeAccountData = accountQuery.data ?? cachedAccount;
+  const currentAccount = activeAccountData ? mapAccount(activeAccountData) : null;
+  const rawLoan = isDemoMode ? demoLoan : (currentAccount?.loan ?? null);
+  const daysUntilDue = rawLoan ? daysUntilDate(rawLoan.nextDueDate) : 0;
+  const loan = rawLoan
+    ? {
+        ...rawLoan,
+        status: isDemoMode
+          ? rawLoan.status
+          : resolveEffectiveLoanStatus(rawLoan, daysUntilDue),
+      }
+    : null;
+  const payments = isDemoMode ? demoPayments : (currentAccount?.payments ?? []);
+  const clientName = isDemoMode ? demoLoan.clientName : (activeAccountData?.client.name ?? null);
   const progressPercent = loan
     ? Math.min((loan.paidMonths / loan.totalMonths) * 100, 100)
     : 0;
   const errorStatus = accountErrorStatus(accountQuery.error);
   const syncError =
-    sessionToken && accountQuery.error && errorStatus !== 401
+    !isDemoMode && sessionToken && accountQuery.error && errorStatus !== 401
       ? accountErrorMessage(accountQuery.error)
       : null;
   const isLoading =
     isSessionLoading ||
-    (Boolean(sessionToken) && API_IS_CONFIGURED && accountQuery.isLoading);
-  const isAuthenticated = Boolean(sessionToken && accountQuery.data);
-  const hasSession = Boolean(sessionToken);
+    (!isDemoMode &&
+      Boolean(sessionToken) &&
+      API_IS_CONFIGURED &&
+      accountQuery.isLoading &&
+      !cachedAccount);
+  const isAuthenticated = isDemoMode || Boolean(sessionToken && activeAccountData);
+  const hasSession = isDemoMode || Boolean(sessionToken);
   const isDeviceLocked =
     loan?.status === "locked" || loan?.status === "overdue";
+  const isUnauthenticatedInProd =
+    !isSessionLoading && API_IS_CONFIGURED && !isDemoMode && !isAuthenticated;
+  const shouldEnforceKiosk = isDeviceLocked || isUnauthenticatedInProd;
+  const shouldProtectCredit = loan ? loan.status !== "completed" : true;
+  const frpAccountIds = (
+    activeAccountData as
+      | (CustomerAccount & { protection?: { frpAccountIds?: string[] } })
+      | null
+  )?.protection?.frpAccountIds;
+
+  useEffect(() => {
+    if (Array.isArray(frpAccountIds) && frpAccountIds.length > 0) {
+      void setFrpAccounts(frpAccountIds);
+    }
+  }, [frpAccountIds]);
+
+  useEffect(() => {
+    void setCreditProtectionEnabled(shouldProtectCredit);
+  }, [shouldProtectCredit]);
+
+  useEffect(() => {
+    void setKioskLockEnabled(shouldEnforceKiosk);
+    if (isDeviceLocked && !wasLockedRef.current) {
+      void lockDeviceNow();
+    }
+    wasLockedRef.current = isDeviceLocked;
+  }, [isDeviceLocked, shouldEnforceKiosk]);
 
   const contextValue = useMemo<LoanContextType>(
     () => ({
       loan,
-      payments: currentAccount?.payments ?? [],
-      clientName: accountQuery.data?.client.name ?? null,
+      payments,
+      clientName,
       isDeviceLocked,
       daysUntilDue,
       progressPercent,
       isPaymentModalOpen,
       openPaymentModal: () => setIsPaymentModalOpen(true),
       closePaymentModal: () => setIsPaymentModalOpen(false),
+      makePay,
+      setLoanStatus,
+      resetDemo,
+      enterDemoMode,
       login,
       activate,
       logout,
@@ -257,17 +434,21 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       isAuthenticated,
       hasSession,
-      apiConfigured: API_IS_CONFIGURED,
+      apiConfigured: API_IS_CONFIGURED || isDemoMode,
       syncError,
     }),
     [
       loan,
-      currentAccount,
-      accountQuery.data?.client.name,
+      payments,
+      clientName,
       isDeviceLocked,
       daysUntilDue,
       progressPercent,
       isPaymentModalOpen,
+      makePay,
+      setLoanStatus,
+      resetDemo,
+      enterDemoMode,
       login,
       activate,
       logout,
@@ -275,6 +456,7 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       isAuthenticated,
       hasSession,
+      isDemoMode,
       syncError,
     ],
   );
