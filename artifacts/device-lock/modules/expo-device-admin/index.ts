@@ -158,3 +158,16 @@ export async function setKioskLockEnabled(enabled: boolean): Promise<boolean> {
     return false;
   }
 }
+
+
+export async function configureBackgroundSync(
+  apiBaseUrl: string,
+  sessionToken: string | null,
+): Promise<boolean> {
+  if (!isSupported || !ExpoDeviceAdmin?.configureBackgroundSync) return false;
+  try {
+    return await ExpoDeviceAdmin.configureBackgroundSync(apiBaseUrl, sessionToken);
+  } catch {
+    return false;
+  }
+}

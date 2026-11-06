@@ -39,6 +39,10 @@ type LinkedCustomerDevice = {
   osVersion: string | null;
   deviceAdminActive: boolean;
   deviceOwner: boolean;
+  latitude: number | null;
+  longitude: number | null;
+  locationAccuracy: number | null;
+  locationUpdatedAt: string | null;
   lastSeenAt: string;
 };
 
@@ -277,6 +281,58 @@ export default function ClientDetail() {
                       {formatDate(linkedDevice.lastSeenAt)}
                     </span>
                   </div>
+                  {linkedDevice.latitude != null &&
+                  linkedDevice.longitude != null ? (
+                    <div className="mt-3 space-y-2.5 border-t border-emerald-500/20 pt-3">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1 font-semibold text-foreground">
+                          <MapPin className="h-3.5 w-3.5 text-primary" />
+                          Ubicación GPS en Vivo
+                        </span>
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${linkedDevice.latitude},${linkedDevice.longitude}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs font-semibold text-primary underline hover:opacity-80"
+                        >
+                          Abrir en Google Maps ↗
+                        </a>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>
+                          Coord:{" "}
+                          <b className="font-mono text-foreground">
+                            {linkedDevice.latitude.toFixed(5)},{" "}
+                            {linkedDevice.longitude.toFixed(5)}
+                          </b>
+                        </span>
+                        {linkedDevice.locationAccuracy != null && (
+                          <span>
+                            Precisión: ±
+                            {Math.round(linkedDevice.locationAccuracy)}m
+                          </span>
+                        )}
+                      </div>
+                      <div className="overflow-hidden rounded-lg border border-border">
+                        <iframe
+                          title="Ubicación del dispositivo"
+                          width="100%"
+                          height="190"
+                          loading="lazy"
+                          referrerPolicy="no-referrer-when-downgrade"
+                          src={`https://maps.google.com/maps?q=${linkedDevice.latitude},${linkedDevice.longitude}&z=16&output=embed`}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex items-center justify-between border-t border-emerald-500/20 pt-2 text-[11px] text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <MapPin className="h-3 w-3 text-amber-400" />
+                        Ubicación GPS:
+                      </span>
+                      <span>Esperando coordenadas del equipo…</span>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">

@@ -26,6 +26,7 @@ import {
   UserPlus,
   Phone,
   Mail,
+  MapPin,
   Smartphone,
   ShieldCheck,
 } from "lucide-react";
@@ -38,6 +39,8 @@ type LinkedCustomerDevice = {
   osVersion: string | null;
   deviceAdminActive: boolean;
   deviceOwner: boolean;
+  latitude: number | null;
+  longitude: number | null;
   lastSeenAt: string;
 };
 
@@ -177,14 +180,27 @@ export default function Clients() {
                                 <Smartphone className="w-3.5 h-3.5 text-primary" />
                                 {deviceName}
                               </span>
-                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
-                                <ShieldCheck className="w-3 h-3" />
-                                {device.deviceOwner
-                                  ? "Device Owner"
-                                  : device.deviceAdminActive
-                                    ? "Admin Activo"
-                                    : "Conectado"}
-                              </span>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
+                                  <ShieldCheck className="w-3 h-3" />
+                                  {device.deviceOwner
+                                    ? "Device Owner"
+                                    : device.deviceAdminActive
+                                      ? "Admin Activo"
+                                      : "Conectado"}
+                                </span>
+                                {device.latitude != null &&
+                                  device.longitude != null && (
+                                    <a
+                                      href={`https://www.google.com/maps/search/?api=1&query=${device.latitude},${device.longitude}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary hover:underline"
+                                    >
+                                      <MapPin className="w-3 h-3" /> Ver GPS ↗
+                                    </a>
+                                  )}
+                              </div>
                             </div>
                           ) : (
                             <span className="text-xs text-muted-foreground italic">

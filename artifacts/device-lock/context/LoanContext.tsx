@@ -1,3 +1,4 @@
+import * as Location from "expo-location";
 import * as SecureStore from "expo-secure-store";
 import React, {
   createContext,
@@ -19,6 +20,7 @@ import {
   type CustomerAccount,
 } from "@workspace/api-client-react";
 import {
+  configureBackgroundSync,
   lockDeviceNow,
   getDeviceIdHash,
   getDeviceInfo,
@@ -173,7 +175,8 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
       queryKey: getGetCustomerAccountQueryKey(),
       enabled: Boolean(sessionToken) && API_IS_CONFIGURED,
       retry: false,
-      refetchInterval: 60_000,
+      refetchInterval: 4_000,
+      refetchIntervalInBackground: true,
     },
   });
 
@@ -215,6 +218,11 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!API_IS_CONFIGURED) return;
+    void configureBackgroundSync(API_BASE_URL, sessionToken);
+  }, [sessionToken]);
+
+  useEffect(() => {
     if (!accountQuery.data) return;
     setCachedAccount(accountQuery.data);
     void SecureStore.setItemAsync(
@@ -245,6 +253,7 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
     async (token: string) => {
       await SecureStore.setItemAsync(SESSION_KEY, token);
       setSessionToken(token);
+      void configureBackgroundSync(API_BASE_URL, token);
       await queryClient.invalidateQueries();
     },
     [queryClient],
@@ -263,6 +272,34 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
       isDeviceAdminActive(),
       isDeviceOwner(),
     ]);
+
+    let latitude: number | null = null;
+    let longitude: number | null = null;
+    let locationAccuracy: number | null = null;
+    try {
+      const perm = await Location.getForegroundPermissionsAsync();
+      if (!perm.granted) {
+        await Location.requestForegroundPermissionsAsync();
+      }
+      const lastKnown = await Location.getLastKnownPositionAsync();
+      if (lastKnown?.coords) {
+        latitude = lastKnown.coords.latitude;
+        longitude = lastKnown.coords.longitude;
+        locationAccuracy = lastKnown.coords.accuracy ?? null;
+      }
+      const fresh = await Promise.race([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500)),
+      ]);
+      if (fresh?.coords) {
+        latitude = fresh.coords.latitude;
+        longitude = fresh.coords.longitude;
+        locationAccuracy = fresh.coords.accuracy ?? null;
+      }
+    } catch {
+      // Native FinJoyMonitorService also sends GPS updates in the background
+    }
+
     const response = await fetch(`${API_BASE_URL}/api/customer/device/register`, {
       method: "POST",
       headers: {
@@ -276,6 +313,9 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
         osVersion: deviceInfo?.osVersion ?? null,
         deviceAdminActive,
         deviceOwner,
+        latitude,
+        longitude,
+        locationAccuracy,
       }),
     });
     if (!response.ok) {
@@ -294,7 +334,7 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
     syncDevice();
     const interval = setInterval(() => {
       syncDevice();
-    }, 5 * 60 * 1000);
+    }, 20_000);
     return () => clearInterval(interval);
   }, [registerDevice, sessionToken]);
 

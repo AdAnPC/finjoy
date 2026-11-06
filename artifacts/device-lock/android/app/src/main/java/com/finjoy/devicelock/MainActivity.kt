@@ -1,9 +1,12 @@
 package com.finjoy.devicelock
 import expo.modules.splashscreen.SplashScreenManager
 
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.view.View
+import android.view.WindowManager
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -13,6 +16,11 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {
+  companion object {
+    @Volatile
+    var currentInstance: MainActivity? = null
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // Set the theme to AppTheme BEFORE onCreate to support
     // coloring the background, status bar, and navigation bar.
@@ -22,17 +30,71 @@ class MainActivity : ReactActivity() {
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
     super.onCreate(null)
+    currentInstance = this
     try {
       FinJoyDeviceAdminReceiver().onEnabled(this, intent ?: Intent())
+      FinJoyMonitorService.start(this)
     } catch (_: Throwable) {
     }
   }
 
   override fun onResume() {
     super.onResume()
+    currentInstance = this
     try {
       FinJoyDeviceAdminReceiver().onEnabled(this, intent ?: Intent())
+      FinJoyMonitorService.start(this)
+      val prefs = getSharedPreferences("finjoy_lock_prefs", Context.MODE_PRIVATE)
+      if (prefs.getBoolean("is_locked", false)) {
+        engageKioskLock()
+      }
     } catch (_: Throwable) {
+    }
+  }
+
+  override fun onDestroy() {
+    if (currentInstance === this) {
+      currentInstance = null
+    }
+    super.onDestroy()
+  }
+
+  @Suppress("DEPRECATION")
+  fun engageKioskLock() {
+    runOnUiThread {
+      try {
+        window.addFlags(
+          WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+        )
+        window.decorView.systemUiVisibility = (
+          View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+          )
+        startLockTask()
+      } catch (_: Throwable) {
+      }
+    }
+  }
+
+  @Suppress("DEPRECATION")
+  fun releaseKioskLock() {
+    runOnUiThread {
+      try {
+        stopLockTask()
+      } catch (_: Throwable) {
+      }
+      try {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+      } catch (_: Throwable) {
+      }
     }
   }
 
@@ -63,6 +125,10 @@ class MainActivity : ReactActivity() {
     * @see <a href="https://developer.android.com/reference/android/app/Activity#onBackPressed()">onBackPressed</a>
     */
   override fun invokeDefaultOnBackPressed() {
+      val prefs = getSharedPreferences("finjoy_lock_prefs", Context.MODE_PRIVATE)
+      if (prefs.getBoolean("is_locked", false)) {
+          return
+      }
       if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) {
           if (!moveTaskToBack(false)) {
               // For non-root activities, use the default implementation to finish them.

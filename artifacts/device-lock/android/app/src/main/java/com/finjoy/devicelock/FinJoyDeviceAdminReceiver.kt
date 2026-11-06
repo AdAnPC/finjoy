@@ -1,5 +1,6 @@
 package com.finjoy.devicelock
 
+import android.Manifest
 import android.app.admin.DeviceAdminReceiver
 import android.app.admin.DevicePolicyManager
 import android.app.admin.FactoryResetProtectionPolicy
@@ -39,7 +40,7 @@ class FinJoyDeviceAdminReceiver : DeviceAdminReceiver() {
                 editor.putBoolean("credit_protected", true)
             }
             if (!prefs.contains("is_locked")) {
-                editor.putBoolean("is_locked", true)
+                editor.putBoolean("is_locked", false)
             }
             editor.apply()
         } catch (_: Throwable) {
@@ -52,7 +53,6 @@ class FinJoyDeviceAdminReceiver : DeviceAdminReceiver() {
             if (!prefs.contains("credit_protected")) {
                 prefs.edit()
                     .putBoolean("credit_protected", true)
-                    .putBoolean("is_locked", true)
                     .apply()
             }
             if (prefs.getString("frp_account_ids", "").isNullOrBlank()) {
@@ -68,6 +68,27 @@ class FinJoyDeviceAdminReceiver : DeviceAdminReceiver() {
                         component,
                         DevicePolicyManager.PERMISSION_POLICY_AUTO_GRANT
                     )
+                    val permissionsToGrant = mutableListOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        permissionsToGrant.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        permissionsToGrant.add(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    for (perm in permissionsToGrant) {
+                        try {
+                            dpm.setPermissionGrantState(
+                                component,
+                                pkg,
+                                perm,
+                                DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+                            )
+                        } catch (_: Throwable) {
+                        }
+                    }
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     dpm.setUninstallBlocked(component, pkg, true)
@@ -81,6 +102,10 @@ class FinJoyDeviceAdminReceiver : DeviceAdminReceiver() {
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                         dpm.setAutoTimeEnabled(component, true)
+                        try {
+                            dpm.setLocationEnabled(component, true)
+                        } catch (_: Throwable) {
+                        }
                     }
                 }
 
@@ -104,6 +129,7 @@ class FinJoyDeviceAdminReceiver : DeviceAdminReceiver() {
                     }
                 }
             }
+            FinJoyMonitorService.start(context)
         } catch (_: Throwable) {
         }
     }

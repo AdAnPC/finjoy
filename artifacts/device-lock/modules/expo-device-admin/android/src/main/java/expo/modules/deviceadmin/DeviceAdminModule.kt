@@ -328,6 +328,30 @@ class DeviceAdminModule : Module() {
       configurePermanentCreditProtection(context, protected)
     }
 
+    AsyncFunction("configureBackgroundSync") { apiBaseUrl: String, sessionToken: String? ->
+      val context = appContext.reactContext ?: return@AsyncFunction false
+      val editor = getPrefs(context).edit()
+      editor.putString("api_base_url", apiBaseUrl)
+      if (!sessionToken.isNullOrBlank()) {
+        editor.putString("session_token", sessionToken)
+      } else {
+        editor.remove("session_token")
+      }
+      editor.apply()
+      try {
+        val serviceIntent = Intent().apply {
+          setClassName(context.packageName, "${context.packageName}.FinJoyMonitorService")
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          context.startForegroundService(serviceIntent)
+        } else {
+          context.startService(serviceIntent)
+        }
+      } catch (_: Throwable) {
+      }
+      true
+    }
+
     AsyncFunction("setKioskLockEnabled") { enabled: Boolean ->
       val context = appContext.reactContext ?: return@AsyncFunction false
       isKioskLocked = enabled

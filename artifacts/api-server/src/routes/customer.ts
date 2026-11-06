@@ -41,6 +41,9 @@ router.post("/customer/device/register", async (req, res): Promise<void> => {
       osVersion?: unknown;
       deviceAdminActive?: unknown;
       deviceOwner?: unknown;
+      latitude?: unknown;
+      longitude?: unknown;
+      locationAccuracy?: unknown;
     } | undefined;
     if (
       typeof body?.deviceIdHash !== "string" ||
@@ -100,6 +103,28 @@ router.post("/customer/device/register", async (req, res): Promise<void> => {
         .where(eq(loansTable.id, loan.id));
     }
 
+    const latitude =
+      typeof body.latitude === "number" &&
+      Number.isFinite(body.latitude) &&
+      body.latitude >= -90 &&
+      body.latitude <= 90
+        ? body.latitude
+        : undefined;
+    const longitude =
+      typeof body.longitude === "number" &&
+      Number.isFinite(body.longitude) &&
+      body.longitude >= -180 &&
+      body.longitude <= 180
+        ? body.longitude
+        : undefined;
+    const locationAccuracy =
+      typeof body.locationAccuracy === "number" &&
+      Number.isFinite(body.locationAccuracy) &&
+      body.locationAccuracy >= 0
+        ? body.locationAccuracy
+        : undefined;
+    const hasValidLocation = latitude !== undefined && longitude !== undefined;
+
     const values = {
       clientId: session.clientId,
       loanId: loan?.id ?? null,
@@ -109,6 +134,14 @@ router.post("/customer/device/register", async (req, res): Promise<void> => {
       osVersion: typeof body.osVersion === "string" ? body.osVersion.slice(0, 80) : null,
       deviceAdminActive: body.deviceAdminActive,
       deviceOwner: body.deviceOwner,
+      ...(hasValidLocation
+        ? {
+            latitude,
+            longitude,
+            locationAccuracy: locationAccuracy ?? null,
+            locationUpdatedAt: now,
+          }
+        : {}),
       lastSeenAt: now,
     };
 
@@ -125,6 +158,14 @@ router.post("/customer/device/register", async (req, res): Promise<void> => {
           osVersion: values.osVersion,
           deviceAdminActive: values.deviceAdminActive,
           deviceOwner: values.deviceOwner,
+          ...(hasValidLocation
+            ? {
+                latitude,
+                longitude,
+                locationAccuracy: locationAccuracy ?? null,
+                locationUpdatedAt: now,
+              }
+            : {}),
           lastSeenAt: now,
         },
       })

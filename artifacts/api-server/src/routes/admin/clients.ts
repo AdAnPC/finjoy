@@ -40,6 +40,12 @@ function serializeCustomerDevice(device: CustomerDevice) {
     osVersion: device.osVersion,
     deviceAdminActive: device.deviceAdminActive,
     deviceOwner: device.deviceOwner,
+    latitude: device.latitude ?? null,
+    longitude: device.longitude ?? null,
+    locationAccuracy: device.locationAccuracy ?? null,
+    locationUpdatedAt: device.locationUpdatedAt
+      ? device.locationUpdatedAt.toISOString()
+      : null,
     lastSeenAt: device.lastSeenAt.toISOString(),
     firstSeenAt: device.firstSeenAt.toISOString(),
   };

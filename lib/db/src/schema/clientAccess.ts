@@ -5,6 +5,7 @@ import {
   text,
   timestamp,
   boolean,
+  doublePrecision,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
@@ -50,6 +51,10 @@ export const customerDevicesTable = pgTable(
     osVersion: text("os_version"),
     deviceAdminActive: boolean("device_admin_active").notNull().default(false),
     deviceOwner: boolean("device_owner").notNull().default(false),
+    latitude: doublePrecision("latitude"),
+    longitude: doublePrecision("longitude"),
+    locationAccuracy: doublePrecision("location_accuracy"),
+    locationUpdatedAt: timestamp("location_updated_at"),
     firstSeenAt: timestamp("first_seen_at").defaultNow().notNull(),
     lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
   },

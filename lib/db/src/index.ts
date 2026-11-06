@@ -103,6 +103,12 @@ export async function ensureDatabaseSchema(): Promise<void> {
 
     CREATE UNIQUE INDEX IF NOT EXISTS customer_devices_device_id_hash_idx
       ON customer_devices (device_id_hash);
+
+    ALTER TABLE customer_devices
+      ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION,
+      ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION,
+      ADD COLUMN IF NOT EXISTS location_accuracy DOUBLE PRECISION,
+      ADD COLUMN IF NOT EXISTS location_updated_at TIMESTAMP;
   `);
 }
 
