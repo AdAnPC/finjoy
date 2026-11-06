@@ -83,12 +83,18 @@ export default function ApkDistribution() {
     organization_name: organizationName,
   };
 
+  const publicOrigin =
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1"
+      ? "https://workspaceapi-server-production-d7bb.up.railway.app"
+      : window.location.origin;
+
   const provisioningPayload = current
     ? JSON.stringify({
         "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME":
           "com.finjoy.devicelock/.FinJoyDeviceAdminReceiver",
         "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION":
-          `${window.location.origin}${APK_API_BASE}/download`,
+          `${publicOrigin}/FinJoy-DeviceLock.apk`,
         "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM":
           hexToBase64Url(current.checksum),
         "android.app.extra.PROVISIONING_SKIP_EDUCATION_SCREENS": true,
