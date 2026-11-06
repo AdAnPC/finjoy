@@ -41,7 +41,7 @@ function serializeCustomerDevice(device: CustomerDevice) {
     deviceAdminActive: device.deviceAdminActive,
     deviceOwner: device.deviceOwner,
     lastSeenAt: device.lastSeenAt.toISOString(),
-    createdAt: device.createdAt.toISOString(),
+    firstSeenAt: device.firstSeenAt.toISOString(),
   };
 }
 
@@ -169,9 +169,41 @@ router.get("/admin/clients/:id", async (req, res): Promise<void> => {
       .limit(1),
   ]);
 
-  const rawLoan = rawLoans[0];
+  let rawLoan = rawLoans[0];
   const device = devices[0];
   const account = accounts[0];
+
+  if (!rawLoan && device) {
+    const now = new Date();
+    const nextDueDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const fullModel = [device.manufacturer, device.model]
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 160);
+    const [createdLoan] = await db
+      .insert(loansTable)
+      .values({
+        clientId: id,
+        deviceModel: fullModel || device.model,
+        deviceImei: device.deviceIdHash.slice(0, 15).toUpperCase(),
+        totalAmount: "600.00",
+        paidAmount: "0.00",
+        monthlyPayment: "50.00",
+        nextDueDate,
+        startDate: now,
+        totalMonths: 12,
+        paidMonths: 0,
+        gracePeriodDays: 3,
+        status: "active",
+      })
+      .returning();
+    rawLoan = createdLoan;
+    await db
+      .update(customerDevicesTable)
+      .set({ loanId: createdLoan.id })
+      .where(eq(customerDevicesTable.id, device.id));
+  }
+
   const loan = rawLoan ? await syncSingleLoanStatus(rawLoan) : undefined;
   const payments = loan
     ? await db
