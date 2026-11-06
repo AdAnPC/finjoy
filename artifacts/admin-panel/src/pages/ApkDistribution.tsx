@@ -10,6 +10,7 @@ import {
   FileArchive,
   Loader2,
   Lock,
+  Maximize2,
   Smartphone,
   ShieldCheck,
   Terminal,
@@ -17,6 +18,14 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -102,9 +111,13 @@ export default function ApkDistribution() {
     setQrImageUrl(null);
     if (provisioningPayload) {
       QRCode.toDataURL(provisioningPayload, {
-        width: 220,
-        margin: 2,
-        errorCorrectionLevel: "M",
+        width: 640,
+        margin: 4,
+        errorCorrectionLevel: "L",
+        color: {
+          dark: "#000000",
+          light: "#FFFFFF",
+        },
       })
         .then((dataUrl) => {
           if (!cancelled) setQrImageUrl(dataUrl);
@@ -272,7 +285,7 @@ export default function ApkDistribution() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid gap-6 md:grid-cols-[1.2fr_0.8fr]">
+          <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
             <div className="space-y-4 text-sm">
               <div className="space-y-3 rounded-xl border border-primary/25 bg-primary/5 p-4">
                 <p className="font-semibold text-foreground">
@@ -349,20 +362,58 @@ export default function ApkDistribution() {
               </div>
             </div>
 
-            <div className="flex flex-col items-center justify-center rounded-xl border bg-muted/20 p-4 text-center">
+            <div className="flex flex-col items-center justify-center rounded-xl border bg-muted/20 p-5 text-center">
               {qrImageUrl ? (
                 <>
-                  <img
-                    src={qrImageUrl}
-                    alt="Código QR de aprovisionamiento FinJoy"
-                    className="h-48 w-48 rounded-lg border bg-white p-2"
-                  />
-                  <p className="mt-2 text-xs font-medium">
+                  <div className="rounded-2xl border-2 border-black/10 bg-white p-4 shadow-md">
+                    <img
+                      src={qrImageUrl}
+                      alt="Código QR de aprovisionamiento FinJoy"
+                      className="h-72 w-72 sm:h-80 sm:w-80 object-contain [image-rendering:pixelated]"
+                    />
+                  </div>
+                  <p className="mt-3 text-sm font-semibold">
                     QR de aprovisionamiento · v{current?.version}
                   </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    En un teléfono nuevo o restablecido compatible, inicia el asistente de aprovisionamiento y escanea el QR.
+                  <p className="mt-1 max-w-xs text-xs text-muted-foreground">
+                    En un teléfono nuevo o restablecido de fábrica, toca 6 veces la pantalla de bienvenida y escanea este QR.
                   </p>
+                  <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                    <Dialog>
+                      <DialogTrigger asChild>
+                        <Button type="button" variant="outline" size="sm" className="gap-1.5">
+                          <Maximize2 className="h-3.5 w-3.5" /> Ver QR en grande
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-lg">
+                        <DialogHeader>
+                          <DialogTitle>
+                            QR de Aprovisionamiento · v{current?.version}
+                          </DialogTitle>
+                          <DialogDescription>
+                            Sube el brillo de tu monitor y apunta con la cámara del celular a 15-25 cm de distancia.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="flex flex-col items-center justify-center py-2">
+                          <div className="rounded-2xl border-2 border-black/15 bg-white p-5 shadow-lg">
+                            <img
+                              src={qrImageUrl}
+                              alt="Código QR de aprovisionamiento FinJoy ampliado"
+                              className="h-96 w-96 max-w-full object-contain [image-rendering:pixelated]"
+                            />
+                          </div>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                    <a
+                      href={qrImageUrl}
+                      download={`FinJoy-QR-v${current?.version ?? "1.0.0"}.png`}
+                    >
+                      <Button type="button" variant="secondary" size="sm" className="gap-1.5">
+                        <Download className="h-3.5 w-3.5" /> Descargar QR
+                      </Button>
+                    </a>
+                  </div>
                 </>
               ) : (
                 <p className="px-4 text-xs text-muted-foreground">
