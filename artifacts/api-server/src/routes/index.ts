@@ -6,7 +6,7 @@ import customerRouter from "./customer";
 const router: IRouter = Router();
 
 router.use(healthRouter);
-router.use(adminRouter);
 router.use(customerRouter);
+router.use(adminRouter);
 
 export default router;

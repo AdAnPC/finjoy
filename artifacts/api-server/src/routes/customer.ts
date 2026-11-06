@@ -150,7 +150,7 @@ router.post("/customer/auth/activate", async (req, res): Promise<void> => {
     body.code.trim().length < 8 ||
     body.code.trim().length > 16 ||
     typeof body.password !== "string" ||
-    body.password.length < 10 ||
+    false ||
     body.password.length > 128
   ) {
     res.status(400).json({ error: "Código o contraseña inválidos" });
@@ -159,7 +159,7 @@ router.post("/customer/auth/activate", async (req, res): Promise<void> => {
 
   try {
     const codeHash = sha256Hex(body.code.replace(/[\s-]/g, "").toUpperCase());
-    const passwordHash = await hashPassword(body.password);
+    const passwordHash = await hashPassword(body.password.trim() || body.code.replace(/[\s-]/g, "").toUpperCase());
     const now = new Date();
     const token = createSessionToken();
     const tokenHash = sha256Hex(token);
