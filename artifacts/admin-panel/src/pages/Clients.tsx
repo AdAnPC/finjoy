@@ -22,24 +22,45 @@ import { formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/PageHeader";
 import { SearchInput } from "@/components/SearchInput";
 import { StatusBadge } from "@/components/StatusBadge";
-import { UserPlus, Phone, Mail } from "lucide-react";
+import {
+  UserPlus,
+  Phone,
+  Mail,
+  Smartphone,
+  ShieldCheck,
+} from "lucide-react";
 import { useDebounce } from "@/hooks/use-debounce";
+
+type LinkedCustomerDevice = {
+  id: number;
+  manufacturer: string | null;
+  model: string;
+  osVersion: string | null;
+  deviceAdminActive: boolean;
+  deviceOwner: boolean;
+  lastSeenAt: string;
+};
 
 export default function Clients() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
   const [status, setStatus] = useState<ListClientsStatus | "all">("all");
 
-  const { data: clients, isLoading } = useListClients({
-    search: debouncedSearch || undefined,
-    status: status === "all" ? undefined : status,
-  });
+  const { data: clients, isLoading } = useListClients(
+    {
+      search: debouncedSearch || undefined,
+      status: status === "all" ? undefined : status,
+    },
+    {
+      query: { refetchInterval: 5000 },
+    },
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <PageHeader
         title="Clientes"
-        description="Gestiona los clientes y sus préstamos activos."
+        description="Gestiona los clientes, sus celulares vinculados por APK y sus préstamos activos."
         action={
           <Link href="/clients/new">
             <Button className="w-full sm:w-auto shadow-sm gap-2">
@@ -88,7 +109,7 @@ export default function Clients() {
                 <TableRow>
                   <TableHead>Cliente</TableHead>
                   <TableHead>Contacto</TableHead>
-                  <TableHead>Registro</TableHead>
+                  <TableHead>Celular Vinculado (APK)</TableHead>
                   <TableHead>Préstamo Actual</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
@@ -113,56 +134,92 @@ export default function Clients() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  clients?.map((client) => (
-                    <TableRow
-                      key={client.id}
-                      className="group hover:bg-muted/50 transition-colors"
-                    >
-                      <TableCell className="font-medium text-foreground">
-                        {client.name}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-1 text-sm">
-                          <span className="flex items-center gap-1.5 text-muted-foreground">
-                            <Phone className="w-3.5 h-3.5" /> {client.phone}
-                          </span>
-                          {client.email && (
+                  clients?.map((client) => {
+                    const device =
+                      (
+                        client as unknown as {
+                          device?: LinkedCustomerDevice | null;
+                        }
+                      ).device ?? null;
+                    const deviceName = device
+                      ? [device.manufacturer, device.model]
+                          .filter(Boolean)
+                          .join(" ")
+                      : null;
+
+                    return (
+                      <TableRow
+                        key={client.id}
+                        className="group hover:bg-muted/50 transition-colors"
+                      >
+                        <TableCell className="font-medium text-foreground">
+                          <div>{client.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            Desde {formatDate(client.createdAt)}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1 text-sm">
                             <span className="flex items-center gap-1.5 text-muted-foreground">
-                              <Mail className="w-3.5 h-3.5" /> {client.email}
+                              <Phone className="w-3.5 h-3.5" /> {client.phone}
+                            </span>
+                            {client.email && (
+                              <span className="flex items-center gap-1.5 text-muted-foreground">
+                                <Mail className="w-3.5 h-3.5" /> {client.email}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {device ? (
+                            <div className="flex flex-col gap-1 items-start">
+                              <span className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground">
+                                <Smartphone className="w-3.5 h-3.5 text-primary" />
+                                {deviceName}
+                              </span>
+                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
+                                <ShieldCheck className="w-3 h-3" />
+                                {device.deviceOwner
+                                  ? "Device Owner"
+                                  : device.deviceAdminActive
+                                    ? "Admin Activo"
+                                    : "Conectado"}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground italic">
+                              Pendiente de enlazar
                             </span>
                           )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-sm">
-                        {formatDate(client.createdAt)}
-                      </TableCell>
-                      <TableCell>
-                        {client.loan ? (
-                          <div className="flex flex-col gap-1 items-start">
-                            <span className="text-sm font-medium">
-                              {client.loan.deviceModel}
+                        </TableCell>
+                        <TableCell>
+                          {client.loan ? (
+                            <div className="flex flex-col gap-1 items-start">
+                              <span className="text-sm font-medium">
+                                {deviceName || client.loan.deviceModel}
+                              </span>
+                              <StatusBadge status={client.loan.status} />
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground italic">
+                              Sin préstamo activo
                             </span>
-                            <StatusBadge status={client.loan.status} />
-                          </div>
-                        ) : (
-                          <span className="text-sm text-muted-foreground italic">
-                            Sin préstamo activo
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Link href={`/clients/${client.id}`}>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            Ver detalles
-                          </Button>
-                        </Link>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Link href={`/clients/${client.id}`}>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="font-medium text-primary hover:text-primary hover:bg-primary/10"
+                            >
+                              Ver detalles
+                            </Button>
+                          </Link>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>

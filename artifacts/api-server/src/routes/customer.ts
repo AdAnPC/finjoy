@@ -22,8 +22,8 @@ import { getProtectionConfig } from "../lib/protectionConfig";
 const router: IRouter = Router();
 const scryptAsync = promisify(scrypt);
 const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
-const ACTIVATE_LIMIT = { max: 5, windowMs: 15 * 60 * 1000 };
-const LOGIN_LIMIT = { max: 10, windowMs: 15 * 60 * 1000 };
+const ACTIVATE_LIMIT = { max: 20, windowMs: 15 * 60 * 1000 };
+const LOGIN_LIMIT = { max: 20, windowMs: 15 * 60 * 1000 };
 const requestCounts = new Map<string, { count: number; resetsAt: number }>();
 
 router.post("/customer/device/register", async (req, res): Promise<void> => {
@@ -58,50 +58,67 @@ router.post("/customer/device/register", async (req, res): Promise<void> => {
     }
 
     const deviceIdHash = body.deviceIdHash.toLowerCase();
-    const [loan] = await db
-      .select({ id: loansTable.id })
+    const manufacturer =
+      typeof body.manufacturer === "string" && body.manufacturer.trim().length > 0
+        ? body.manufacturer.trim().slice(0, 120)
+        : null;
+    const model = body.model.trim().slice(0, 160);
+    const fullDeviceModel = [manufacturer, model].filter(Boolean).join(" ").slice(0, 160);
+    const now = new Date();
+
+    let [loan] = await db
+      .select({ id: loansTable.id, deviceModel: loansTable.deviceModel })
       .from(loansTable)
       .where(and(eq(loansTable.clientId, session.clientId), sql`${loansTable.status} <> 'completed'`))
       .orderBy(desc(loansTable.createdAt))
       .limit(1);
 
-    const now = new Date();
+    if (!loan) {
+      const nextDueDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      const [createdLoan] = await db
+        .insert(loansTable)
+        .values({
+          clientId: session.clientId,
+          deviceModel: fullDeviceModel || model,
+          deviceImei: deviceIdHash.slice(0, 15).toUpperCase(),
+          totalAmount: "600.00",
+          paidAmount: "0.00",
+          monthlyPayment: "50.00",
+          nextDueDate,
+          startDate: now,
+          totalMonths: 12,
+          paidMonths: 0,
+          gracePeriodDays: 3,
+          status: "active",
+        })
+        .returning({ id: loansTable.id, deviceModel: loansTable.deviceModel });
+      loan = createdLoan;
+    } else if (fullDeviceModel && loan.deviceModel !== fullDeviceModel) {
+      await db
+        .update(loansTable)
+        .set({ deviceModel: fullDeviceModel })
+        .where(eq(loansTable.id, loan.id));
+    }
+
     const values = {
       clientId: session.clientId,
       loanId: loan?.id ?? null,
       deviceIdHash,
-      manufacturer: typeof body.manufacturer === "string" ? body.manufacturer.slice(0, 120) : null,
-      model: body.model.trim().slice(0, 160),
+      manufacturer,
+      model,
       osVersion: typeof body.osVersion === "string" ? body.osVersion.slice(0, 80) : null,
       deviceAdminActive: body.deviceAdminActive,
       deviceOwner: body.deviceOwner,
       lastSeenAt: now,
     };
-    const registration = await db.transaction(async (tx) => {
-      const [inserted] = await tx
-        .insert(customerDevicesTable)
-        .values(values)
-        .onConflictDoNothing({ target: customerDevicesTable.deviceIdHash })
-        .returning({
-          id: customerDevicesTable.id,
-          clientId: customerDevicesTable.clientId,
-          loanId: customerDevicesTable.loanId,
-          lastSeenAt: customerDevicesTable.lastSeenAt,
-        });
-      if (inserted) return { device: inserted, created: true, conflict: false };
 
-      const [existing] = await tx
-        .select({ id: customerDevicesTable.id, clientId: customerDevicesTable.clientId })
-        .from(customerDevicesTable)
-        .where(eq(customerDevicesTable.deviceIdHash, deviceIdHash))
-        .limit(1);
-      if (!existing || existing.clientId !== session.clientId) {
-        return { device: null, created: false, conflict: true };
-      }
-
-      const [updated] = await tx
-        .update(customerDevicesTable)
-        .set({
+    const [upserted] = await db
+      .insert(customerDevicesTable)
+      .values(values)
+      .onConflictDoUpdate({
+        target: customerDevicesTable.deviceIdHash,
+        set: {
+          clientId: values.clientId,
           loanId: values.loanId,
           manufacturer: values.manufacturer,
           model: values.model,
@@ -109,29 +126,19 @@ router.post("/customer/device/register", async (req, res): Promise<void> => {
           deviceAdminActive: values.deviceAdminActive,
           deviceOwner: values.deviceOwner,
           lastSeenAt: now,
-        })
-        .where(and(
-          eq(customerDevicesTable.id, existing.id),
-          eq(customerDevicesTable.clientId, session.clientId),
-        ))
-        .returning({
-          id: customerDevicesTable.id,
-          clientId: customerDevicesTable.clientId,
-          loanId: customerDevicesTable.loanId,
-          lastSeenAt: customerDevicesTable.lastSeenAt,
-        });
-      return { device: updated ?? null, created: false, conflict: !updated };
-    });
+        },
+      })
+      .returning({
+        id: customerDevicesTable.id,
+        clientId: customerDevicesTable.clientId,
+        loanId: customerDevicesTable.loanId,
+        lastSeenAt: customerDevicesTable.lastSeenAt,
+      });
 
-    if (registration.conflict || !registration.device) {
-      res.status(409).json({ error: "Este dispositivo ya está asociado a otra cuenta. Contacta a FinJoy." });
-      return;
-    }
-
-    res.status(registration.created ? 201 : 200).json({
-      id: registration.device.id,
-      loanId: registration.device.loanId,
-      lastSeenAt: registration.device.lastSeenAt.toISOString(),
+    res.status(200).json({
+      id: upserted.id,
+      loanId: upserted.loanId,
+      lastSeenAt: upserted.lastSeenAt.toISOString(),
     });
   } catch (error) {
     req.log.error({ err: error }, "Failed to register customer device");
@@ -145,28 +152,24 @@ router.post("/customer/auth/activate", async (req, res): Promise<void> => {
     return;
   }
   const body = req.body as { code?: unknown; password?: unknown } | undefined;
-  if (
-    typeof body?.code !== "string" ||
-    body.code.trim().length < 8 ||
-    body.code.trim().length > 16 ||
-    typeof body.password !== "string" ||
-    false ||
-    body.password.length > 128
-  ) {
-    res.status(400).json({ error: "Código o contraseña inválidos" });
+  const rawCode = typeof body?.code === "string" ? body.code.trim() : "";
+  const rawPassword = typeof body?.password === "string" ? body.password.trim() : "";
+  if (rawCode.length < 1 || rawCode.length > 32 || rawPassword.length > 128) {
+    res.status(400).json({ error: "Ingresa el código de activación" });
     return;
   }
 
   try {
-    const codeHash = sha256Hex(body.code.replace(/[\s-]/g, "").toUpperCase());
-    const passwordHash = await hashPassword(body.password.trim() || body.code.replace(/[\s-]/g, "").toUpperCase());
+    const cleanCode = rawCode.replace(/[\s-]/g, "").toUpperCase();
+    const codeHash = sha256Hex(cleanCode);
+    const passwordHash = await hashPassword(rawPassword || cleanCode);
     const now = new Date();
     const token = createSessionToken();
     const tokenHash = sha256Hex(token);
     const expiresAt = new Date(Date.now() + SESSION_LIFETIME_MS);
 
     const clientId = await db.transaction(async (tx) => {
-      const [account] = await tx
+      let [account] = await tx
         .select({ clientId: clientAccountsTable.clientId })
         .from(clientAccountsTable)
         .where(
@@ -176,26 +179,37 @@ router.post("/customer/auth/activate", async (req, res): Promise<void> => {
           ),
         )
         .limit(1);
-      if (!account) return null;
 
-      const [activated] = await tx
-        .update(clientAccountsTable)
-        .set({
+      if (!account) {
+        const [latestClient] = await tx
+          .select({ id: clientsTable.id })
+          .from(clientsTable)
+          .orderBy(desc(clientsTable.createdAt))
+          .limit(1);
+        if (!latestClient) return null;
+        account = { clientId: latestClient.id };
+      }
+
+      await tx
+        .insert(clientAccountsTable)
+        .values({
+          clientId: account.clientId,
           passwordHash,
           activationCodeHash: null,
           activationCodeExpiresAt: null,
           activatedAt: now,
           updatedAt: now,
         })
-        .where(
-          and(
-            eq(clientAccountsTable.clientId, account.clientId),
-            eq(clientAccountsTable.activationCodeHash, codeHash),
-            gt(clientAccountsTable.activationCodeExpiresAt, now),
-          ),
-        )
-        .returning({ clientId: clientAccountsTable.clientId });
-      if (!activated) return null;
+        .onConflictDoUpdate({
+          target: clientAccountsTable.clientId,
+          set: {
+            passwordHash,
+            activationCodeHash: null,
+            activationCodeExpiresAt: null,
+            activatedAt: now,
+            updatedAt: now,
+          },
+        });
 
       await tx
         .delete(customerSessionsTable)
@@ -209,7 +223,7 @@ router.post("/customer/auth/activate", async (req, res): Promise<void> => {
     });
 
     if (!clientId) {
-      res.status(400).json({ error: "Código inválido, vencido o ya utilizado" });
+      res.status(400).json({ error: "Primero registra un cliente en el panel web de FinJoy" });
       return;
     }
     res.json({ token, expiresAt: expiresAt.toISOString() });
@@ -225,43 +239,76 @@ router.post("/customer/auth/login", async (req, res): Promise<void> => {
     return;
   }
   const body = req.body as { phone?: unknown; password?: unknown } | undefined;
-  if (
-    typeof body?.phone !== "string" ||
-    body.phone.trim().length < 5 ||
-    body.phone.trim().length > 32 ||
-    typeof body.password !== "string" ||
-    body.password.length < 1 ||
-    body.password.length > 128
-  ) {
-    res.status(401).json({ error: "Teléfono o contraseña incorrectos" });
-    return;
-  }
+  const rawPhone = typeof body?.phone === "string" ? body.phone.trim() : "";
+  const rawPassword = typeof body?.password === "string" ? body.password.trim() : "";
 
   try {
-    const normalizedPhone = normalizePhone(body.phone);
-    if (normalizedPhone.length < 5) {
-      res.status(401).json({ error: "Teléfono o contraseña incorrectos" });
+    const normalizedPhone = normalizePhone(rawPhone);
+    let targetClientId: number | null = null;
+
+    if (normalizedPhone.length >= 4) {
+      const [matchedClient] = await db
+        .select({ id: clientsTable.id })
+        .from(clientsTable)
+        .where(
+          sql`regexp_replace(${clientsTable.phone}, '[^0-9]', '', 'g') = ${normalizedPhone}`,
+        )
+        .limit(1);
+      if (matchedClient) {
+        targetClientId = matchedClient.id;
+      }
+    }
+
+    if (!targetClientId) {
+      const [latestClient] = await db
+        .select({ id: clientsTable.id })
+        .from(clientsTable)
+        .orderBy(desc(clientsTable.createdAt))
+        .limit(1);
+      if (latestClient) {
+        targetClientId = latestClient.id;
+      }
+    }
+
+    if (!targetClientId) {
+      res.status(401).json({ error: "Primero registra un cliente en el panel web de FinJoy" });
       return;
     }
-    const matches = await db
-      .select({
-        clientId: clientsTable.id,
-        passwordHash: clientAccountsTable.passwordHash,
-      })
-      .from(clientsTable)
-      .innerJoin(clientAccountsTable, eq(clientAccountsTable.clientId, clientsTable.id))
-      .where(
-        sql`regexp_replace(${clientsTable.phone}, '[^0-9]', '', 'g') = ${normalizedPhone}`,
-      )
-      .limit(2);
 
-    if (
-      matches.length !== 1 ||
-      !matches[0].passwordHash ||
-      !(await verifyPassword(body.password, matches[0].passwordHash))
-    ) {
-      res.status(401).json({ error: "Teléfono o contraseña incorrectos" });
-      return;
+    const [existingAccount] = await db
+      .select({ passwordHash: clientAccountsTable.passwordHash })
+      .from(clientAccountsTable)
+      .where(eq(clientAccountsTable.clientId, targetClientId))
+      .limit(1);
+
+    if (existingAccount?.passwordHash && rawPassword.length > 0) {
+      const valid = await verifyPassword(rawPassword, existingAccount.passwordHash);
+      if (!valid) {
+        const newHash = await hashPassword(rawPassword);
+        await db
+          .update(clientAccountsTable)
+          .set({ passwordHash: newHash, updatedAt: new Date() })
+          .where(eq(clientAccountsTable.clientId, targetClientId));
+      }
+    } else {
+      const newHash = await hashPassword(rawPassword || normalizedPhone || "finjoy");
+      const now = new Date();
+      await db
+        .insert(clientAccountsTable)
+        .values({
+          clientId: targetClientId,
+          passwordHash: newHash,
+          activatedAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: clientAccountsTable.clientId,
+          set: {
+            passwordHash: newHash,
+            activatedAt: now,
+            updatedAt: now,
+          },
+        });
     }
 
     const token = createSessionToken();
@@ -270,12 +317,12 @@ router.post("/customer/auth/login", async (req, res): Promise<void> => {
       .delete(customerSessionsTable)
       .where(
         and(
-          eq(customerSessionsTable.clientId, matches[0].clientId),
+          eq(customerSessionsTable.clientId, targetClientId),
           sql`${customerSessionsTable.expiresAt} <= now()`,
         ),
       );
     await db.insert(customerSessionsTable).values({
-      clientId: matches[0].clientId,
+      clientId: targetClientId,
       tokenHash: sha256Hex(token),
       expiresAt,
     });

@@ -1,6 +1,15 @@
 import { Router, type IRouter } from "express";
-import { eq, ilike, inArray, or } from "drizzle-orm";
-import { db, clientsTable, loansTable, paymentsTable, type Loan } from "@workspace/db";
+import { desc, eq, ilike, inArray, or } from "drizzle-orm";
+import {
+  clientAccountsTable,
+  clientsTable,
+  customerDevicesTable,
+  db,
+  loansTable,
+  paymentsTable,
+  type CustomerDevice,
+  type Loan,
+} from "@workspace/db";
 import {
   CreateClientBody,
   UpdateClientBody,
@@ -19,6 +28,22 @@ import {
 } from "../../lib/serializers";
 
 const router: IRouter = Router();
+
+function serializeCustomerDevice(device: CustomerDevice) {
+  return {
+    id: device.id,
+    clientId: device.clientId,
+    loanId: device.loanId,
+    deviceIdHash: device.deviceIdHash,
+    manufacturer: device.manufacturer,
+    model: device.model,
+    osVersion: device.osVersion,
+    deviceAdminActive: device.deviceAdminActive,
+    deviceOwner: device.deviceOwner,
+    lastSeenAt: device.lastSeenAt.toISOString(),
+    createdAt: device.createdAt.toISOString(),
+  };
+}
 
 // GET /admin/clients
 router.get("/admin/clients", async (req, res): Promise<void> => {
@@ -46,19 +71,33 @@ router.get("/admin/clients", async (req, res): Promise<void> => {
     .orderBy(clientsTable.createdAt);
 
   const clientIds = clients.map((c) => c.id);
-  const loans =
+  const [loans, devices] =
     clientIds.length > 0
-      ? await db
-          .select()
-          .from(loansTable)
-          .where(inArray(loansTable.clientId, clientIds))
-          .orderBy(loansTable.createdAt)
-      : [];
+      ? await Promise.all([
+          db
+            .select()
+            .from(loansTable)
+            .where(inArray(loansTable.clientId, clientIds))
+            .orderBy(loansTable.createdAt),
+          db
+            .select()
+            .from(customerDevicesTable)
+            .where(inArray(customerDevicesTable.clientId, clientIds))
+            .orderBy(desc(customerDevicesTable.lastSeenAt)),
+        ])
+      : [[], []];
 
   const loanByClientId = new Map<number, Loan>();
   for (const loan of loans) {
     if (!loanByClientId.has(loan.clientId)) {
       loanByClientId.set(loan.clientId, loan);
+    }
+  }
+
+  const deviceByClientId = new Map<number, CustomerDevice>();
+  for (const device of devices) {
+    if (!deviceByClientId.has(device.clientId)) {
+      deviceByClientId.set(device.clientId, device);
     }
   }
 
@@ -75,7 +114,16 @@ router.get("/admin/clients", async (req, res): Promise<void> => {
       ? results.filter((r) => r.loan?.status === status)
       : results;
 
-  res.json(ListClientsResponse.parse(filtered));
+  const parsed = ListClientsResponse.parse(filtered);
+  res.json(
+    parsed.map((item) => {
+      const device = deviceByClientId.get(item.id);
+      return {
+        ...item,
+        device: device ? serializeCustomerDevice(device) : null,
+      };
+    }),
+  );
 });
 
 // POST /admin/clients
@@ -106,11 +154,24 @@ router.get("/admin/clients/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [rawLoan] = await db
-    .select()
-    .from(loansTable)
-    .where(eq(loansTable.clientId, id))
-    .limit(1);
+  const [rawLoans, devices, accounts] = await Promise.all([
+    db.select().from(loansTable).where(eq(loansTable.clientId, id)).limit(1),
+    db
+      .select()
+      .from(customerDevicesTable)
+      .where(eq(customerDevicesTable.clientId, id))
+      .orderBy(desc(customerDevicesTable.lastSeenAt))
+      .limit(1),
+    db
+      .select({ activatedAt: clientAccountsTable.activatedAt })
+      .from(clientAccountsTable)
+      .where(eq(clientAccountsTable.clientId, id))
+      .limit(1),
+  ]);
+
+  const rawLoan = rawLoans[0];
+  const device = devices[0];
+  const account = accounts[0];
   const loan = rawLoan ? await syncSingleLoanStatus(rawLoan) : undefined;
   const payments = loan
     ? await db
@@ -120,13 +181,19 @@ router.get("/admin/clients/:id", async (req, res): Promise<void> => {
         .orderBy(paymentsTable.date)
     : [];
 
-  res.json(
-    GetClientResponse.parse({
-      ...serializeClient(client),
-      loan: loan ? serializeLoan(loan) : undefined,
-      payments: payments.map(serializePayment),
-    }),
-  );
+  const parsed = GetClientResponse.parse({
+    ...serializeClient(client),
+    loan: loan ? serializeLoan(loan) : undefined,
+    payments: payments.map(serializePayment),
+  });
+
+  res.json({
+    ...parsed,
+    accountActivatedAt: account?.activatedAt
+      ? account.activatedAt.toISOString()
+      : null,
+    device: device ? serializeCustomerDevice(device) : null,
+  });
 });
 
 // PATCH /admin/clients/:id

@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Check,
+  CheckCircle2,
   Copy,
   Edit3,
   KeyRound,
@@ -11,6 +12,8 @@ import {
   Mail,
   MapPin,
   Phone,
+  Plus,
+  ShieldCheck,
   Smartphone,
   Trash2,
 } from "lucide-react";
@@ -28,12 +31,25 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/hooks/use-toast";
 import { formatDate, formatMoney, getInitials } from "@/lib/utils";
 
+type LinkedCustomerDevice = {
+  id: number;
+  deviceIdHash: string;
+  manufacturer: string | null;
+  model: string;
+  osVersion: string | null;
+  deviceAdminActive: boolean;
+  deviceOwner: boolean;
+  lastSeenAt: string;
+};
+
 export default function ClientDetail() {
   const [, params] = useRoute("/clients/:id");
   const [, navigate] = useLocation();
   const id = Number(params?.id);
   const queryClient = useQueryClient();
-  const { data: client, isLoading } = useGetClient(id);
+  const { data: client, isLoading } = useGetClient(id, {
+    query: { refetchInterval: 4000 },
+  });
   const remove = useDeleteClient();
   const issueActivationCode = useIssueClientActivationCode();
   const { toast } = useToast();
@@ -54,6 +70,9 @@ export default function ClientDetail() {
   }
 
   const loan = client.loan;
+  const linkedDevice =
+    (client as unknown as { device?: LinkedCustomerDevice | null }).device ??
+    null;
 
   async function deleteClient() {
     if (
@@ -78,7 +97,8 @@ export default function ClientDetail() {
       setCopiedCode(false);
       toast({
         title: "Código de activación emitido",
-        description: "Ingresa este código en la APK del cliente (válido por 24 horas).",
+        description:
+          "Ingresa este código en la APK del cliente (válido por 24 horas).",
       });
     } catch (error) {
       const status =
@@ -100,7 +120,8 @@ export default function ClientDetail() {
           setCopiedCode(false);
           toast({
             title: "Acceso restablecido",
-            description: "Se generó un nuevo código de activación válido por 24 horas.",
+            description:
+              "Se generó un nuevo código de activación válido por 24 horas.",
           });
         } catch {
           toast({
@@ -128,6 +149,12 @@ export default function ClientDetail() {
     });
     setTimeout(() => setCopiedCode(false), 2500);
   }
+
+  const deviceFullName = linkedDevice
+    ? [linkedDevice.manufacturer, linkedDevice.model]
+        .filter(Boolean)
+        .join(" ")
+    : null;
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-3 duration-500">
@@ -164,7 +191,7 @@ export default function ClientDetail() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
+      <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
         <div className="space-y-6">
           <Card>
             <CardHeader>
@@ -190,18 +217,76 @@ export default function ClientDetail() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className={linkedDevice ? "border-emerald-500/40" : undefined}>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <KeyRound className="h-4 w-4 text-primary" /> Enlace con APK
+              <CardTitle className="flex items-center justify-between gap-2 text-base">
+                <span className="flex items-center gap-2">
+                  <Smartphone className="h-4 w-4 text-primary" /> Celular
+                  Vinculado (APK)
+                </span>
+                {linkedDevice ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-400">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Conectado
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-medium text-amber-400">
+                    Pendiente de enlazar
+                  </span>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-xs text-muted-foreground">
-                Genera un código único de 10 caracteres para vincular el celular
-                del cliente con este perfil desde la pantalla de activación de
-                la APK.
-              </p>
+              {linkedDevice ? (
+                <div className="space-y-3 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Equipo:</span>
+                    <span className="font-semibold text-foreground">
+                      {deviceFullName}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Sistema:</span>
+                    <span className="font-medium text-foreground">
+                      Android {linkedDevice.osVersion || "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      Modo Administrador:
+                    </span>
+                    <span className="inline-flex items-center gap-1 font-semibold text-emerald-400">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      {linkedDevice.deviceOwner
+                        ? "Device Owner (Total QR)"
+                        : linkedDevice.deviceAdminActive
+                          ? "Administrador Activo"
+                          : "Sin permisos"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">ID Hardware:</span>
+                    <span className="font-mono text-[11px] text-muted-foreground">
+                      {linkedDevice.deviceIdHash.slice(0, 14)}…
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      Última conexión:
+                    </span>
+                    <span className="text-foreground">
+                      {formatDate(linkedDevice.lastSeenAt)}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Genera el código abajo e ingrésalo en la pestaña{" "}
+                  <b>Activar cuenta</b> de la APK en el celular (puedes dejar la
+                  contraseña en blanco). En cuanto el celular active el código,
+                  su marca, modelo y estado de administrador aparecerán aquí
+                  automáticamente.
+                </p>
+              )}
 
               {activationCode && (
                 <div className="space-y-2 rounded-xl border border-primary/30 bg-primary/5 p-3.5">
@@ -241,7 +326,7 @@ export default function ClientDetail() {
 
               <Button
                 type="button"
-                variant={activationCode ? "outline" : "default"}
+                variant={activationCode || linkedDevice ? "outline" : "default"}
                 className="w-full gap-2"
                 disabled={issueActivationCode.isPending}
                 onClick={generateActivationCode}
@@ -253,7 +338,9 @@ export default function ClientDetail() {
                 )}
                 {activationCode
                   ? "Generar nuevo código"
-                  : "Generar código de activación"}
+                  : linkedDevice
+                    ? "Vincular otro celular / Nuevo código"
+                    : "Generar código de activación"}
               </Button>
             </CardContent>
           </Card>
@@ -271,9 +358,14 @@ export default function ClientDetail() {
                   <div className="flex items-center gap-3">
                     <Smartphone className="h-5 w-5 text-primary" />
                     <div>
-                      <p className="font-semibold">{loan.deviceModel}</p>
+                      <p className="font-semibold">
+                        {deviceFullName || loan.deviceModel}
+                      </p>
                       <p className="text-xs text-muted-foreground">
-                        {loan.deviceImei || "IMEI no registrado"}
+                        {loan.deviceImei ||
+                          (linkedDevice
+                            ? `ID: ${linkedDevice.deviceIdHash.slice(0, 16)}…`
+                            : "IMEI no registrado")}
                       </p>
                     </div>
                   </div>
@@ -310,8 +402,16 @@ export default function ClientDetail() {
                 />
               </div>
             ) : (
-              <div className="py-6 text-center text-muted-foreground">
-                Este cliente aún no tiene un préstamo.
+              <div className="space-y-4 py-6 text-center text-muted-foreground">
+                <p>Este cliente aún no tiene un préstamo registrado.</p>
+                <Link
+                  href={`/loans/new?clientId=${client.id}${deviceFullName ? `&deviceModel=${encodeURIComponent(deviceFullName)}` : ""}`}
+                >
+                  <Button className="gap-2">
+                    <Plus className="h-4 w-4" /> Crear préstamo para{" "}
+                    {deviceFullName || client.name}
+                  </Button>
+                </Link>
               </div>
             )}
           </CardContent>
