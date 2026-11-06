@@ -48,6 +48,9 @@ Thumbs.db
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
 
-# Replit
 .cache/
 .local/
+.local-protection-config.json
+/data/
+*.apk
+device-current-screen.png

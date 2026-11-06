@@ -2,8 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
-import { ObjectNotFoundError, ObjectStorageService } from "./objectStorage";
-import { S3ObjectStorageService } from "./s3ObjectStorage";
+
+export class ObjectNotFoundError extends Error {
+  constructor() {
+    super("Object not found");
+    this.name = "ObjectNotFoundError";
+  }
+}
 
 export type ApkObjectMetadata = {
   size?: string | number;
@@ -91,45 +96,6 @@ export class LocalApkStorageProvider implements ApkStorageProvider {
   }
 }
 
-class ReplitApkStorageProvider implements ApkStorageProvider {
-  private readonly storage = new ObjectStorageService();
-
-  async createUploadTarget(): Promise<ApkUploadTarget> {
-    const uploadURL = await this.storage.getObjectEntityUploadURL();
-    return {
-      uploadURL,
-      objectPath: this.storage.normalizeObjectEntityPath(uploadURL),
-    };
-  }
-
-  async getObjectEntityFile(objectPath: string): Promise<ApkStoredFile> {
-    const file = await this.storage.getObjectEntityFile(objectPath);
-    return {
-      getMetadata: async () => {
-        const [metadata] = await file.getMetadata();
-        return [
-          {
-            size: metadata.size,
-            contentType: metadata.contentType,
-          },
-        ];
-      },
-      download: async () => {
-        const [bytes] = await file.download();
-        return [Buffer.from(bytes)];
-      },
-      createReadStream: () => file.createReadStream(),
-      delete: async () => {
-        await file.delete();
-      },
-    };
-  }
-
-  async downloadObject(file: ApkStoredFile, cacheTtlSec = 300): Promise<Response> {
-    return buildApkDownloadResponse(file, cacheTtlSec);
-  }
-}
-
 export async function buildApkDownloadResponse(
   file: ApkStoredFile,
   cacheTtlSec = 300,
@@ -152,25 +118,6 @@ let cachedProvider: ApkStorageProvider | undefined;
 export function getApkStorageProvider(): ApkStorageProvider {
   if (cachedProvider) return cachedProvider;
 
-  const providerName = (process.env.APK_STORAGE_PROVIDER ?? "local")
-    .trim()
-    .toLowerCase();
-
-  if (providerName === "s3") {
-    cachedProvider = new S3ObjectStorageService();
-  } else if (providerName === "replit") {
-    if (process.env.PRIVATE_OBJECT_DIR || process.env.REPL_ID) {
-      cachedProvider = new ReplitApkStorageProvider();
-    } else {
-      cachedProvider = new LocalApkStorageProvider();
-    }
-  } else if (providerName === "local" || providerName === "filesystem") {
-    cachedProvider = new LocalApkStorageProvider();
-  } else {
-    cachedProvider = new LocalApkStorageProvider();
-  }
-
+  cachedProvider = new LocalApkStorageProvider();
   return cachedProvider;
 }
-
-export { ObjectNotFoundError };

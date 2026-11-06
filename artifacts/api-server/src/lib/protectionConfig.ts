@@ -1,15 +1,20 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getLocalApkUploadDir } from "./apkStorage";
 
 export interface DeviceProtectionConfig {
   frpAccountIds: string[];
   organizationName: string;
 }
 
-const CONFIG_FILE_PATH = path.resolve(
+const LEGACY_CONFIG_FILE_PATH = path.resolve(
   process.cwd(),
   ".local-protection-config.json",
 );
+
+function getVolumeConfigFilePath(): string {
+  return path.join(getLocalApkUploadDir(), "protection-config.json");
+}
 
 function parseEnvFrpAccounts(): string[] {
   const raw = process.env.FRP_GOOGLE_ACCOUNT_IDS ?? "";
@@ -19,10 +24,23 @@ function parseEnvFrpAccounts(): string[] {
     .filter(Boolean);
 }
 
-export async function getProtectionConfig(): Promise<DeviceProtectionConfig> {
+async function readConfigFromFile(
+  filePath: string,
+): Promise<Partial<DeviceProtectionConfig> | null> {
   try {
-    const raw = await fs.readFile(CONFIG_FILE_PATH, "utf8");
-    const parsed = JSON.parse(raw) as Partial<DeviceProtectionConfig>;
+    const raw = await fs.readFile(filePath, "utf8");
+    return JSON.parse(raw) as Partial<DeviceProtectionConfig>;
+  } catch {
+    return null;
+  }
+}
+
+export async function getProtectionConfig(): Promise<DeviceProtectionConfig> {
+  const parsed =
+    (await readConfigFromFile(getVolumeConfigFilePath())) ??
+    (await readConfigFromFile(LEGACY_CONFIG_FILE_PATH));
+
+  if (parsed) {
     const frpAccountIds = Array.isArray(parsed.frpAccountIds)
       ? parsed.frpAccountIds
           .map((item) => String(item).trim())
@@ -36,12 +54,12 @@ export async function getProtectionConfig(): Promise<DeviceProtectionConfig> {
           ? parsed.organizationName.trim()
           : "FinJoy Crédito Móvil",
     };
-  } catch {
-    return {
-      frpAccountIds: parseEnvFrpAccounts(),
-      organizationName: "FinJoy Crédito Móvil",
-    };
   }
+
+  return {
+    frpAccountIds: parseEnvFrpAccounts(),
+    organizationName: "FinJoy Crédito Móvil",
+  };
 }
 
 export async function saveProtectionConfig(
@@ -60,6 +78,8 @@ export async function saveProtectionConfig(
         ? input.organizationName.trim()
         : current.organizationName,
   };
-  await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(next, null, 2), "utf8");
+  const serialized = JSON.stringify(next, null, 2);
+  await fs.writeFile(getVolumeConfigFilePath(), serialized, "utf8");
+  await fs.writeFile(LEGACY_CONFIG_FILE_PATH, serialized, "utf8").catch(() => {});
   return next;
 }

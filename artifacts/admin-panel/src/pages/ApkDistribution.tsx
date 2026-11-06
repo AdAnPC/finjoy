@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 import {
   Archive,
   Check,
@@ -66,6 +67,7 @@ export default function ApkDistribution() {
   const { toast } = useToast();
   const [copiedAdb, setCopiedAdb] = useState(false);
   const [copiedZeroTouch, setCopiedZeroTouch] = useState(false);
+  const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
 
   const adminExtrasBundle = {
     frp_account_ids: frpAccountIds.join(","),
@@ -95,16 +97,33 @@ export default function ApkDistribution() {
     2,
   );
 
-  const qrImageUrl = provisioningPayload
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=10&data=${encodeURIComponent(provisioningPayload)}`
-    : null;
+  useEffect(() => {
+    let cancelled = false;
+    setQrImageUrl(null);
+    if (provisioningPayload) {
+      QRCode.toDataURL(provisioningPayload, {
+        width: 220,
+        margin: 2,
+        errorCorrectionLevel: "M",
+      })
+        .then((dataUrl) => {
+          if (!cancelled) setQrImageUrl(dataUrl);
+        })
+        .catch(() => {
+          if (!cancelled) setQrImageUrl(null);
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [provisioningPayload]);
 
   async function copyAdbCommand() {
     await navigator.clipboard.writeText(ADB_DEVICE_OWNER_CMD);
     setCopiedAdb(true);
     toast({
       title: "Comando ADB copiado",
-      description: "Ejecútalo con el celular conectado por USB con Depuración USB activa.",
+      description: "Úsalo solo si Android permite asignar Device Owner en ese teléfono.",
     });
     setTimeout(() => setCopiedAdb(false), 2500);
   }
@@ -113,8 +132,8 @@ export default function ApkDistribution() {
     await navigator.clipboard.writeText(zeroTouchDpcExtras);
     setCopiedZeroTouch(true);
     toast({
-      title: "JSON Zero-Touch copiado",
-      description: "Pégalo en el campo DPC Extras de Google Zero-Touch / Knox.",
+      title: "Extras DPC copiados",
+      description: "Úsalos en una configuración Zero-touch compatible; no sustituyen el registro del equipo.",
     });
     setTimeout(() => setCopiedZeroTouch(false), 2500);
   }
@@ -249,8 +268,7 @@ export default function ApkDistribution() {
       <Card className="border-primary/25">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Lock className="h-5 w-5 text-primary" /> Blindaje Anti-Formateo Total
-            (Nivel A: FRP Empresarial + Nivel B: Zero-Touch / QR / ADB)
+            <Lock className="h-5 w-5 text-primary" /> Enrolamiento y protección del dispositivo
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -258,15 +276,15 @@ export default function ApkDistribution() {
             <div className="space-y-4 text-sm">
               <div className="space-y-3 rounded-xl border border-primary/25 bg-primary/5 p-4">
                 <p className="font-semibold text-foreground">
-                  Nivel A: Bloqueo en Chip FRP Empresarial (Contra formateo por botones físicos / Recovery)
+                  FRP empresarial (dispositivos compatibles con Android 11 o posterior)
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Ingresa el ID numérico de la cuenta de Google de tu negocio (puedes separar varios con coma). FinJoy lo graba en el chip de seguridad de Android 11+ (<code>FactoryResetProtectionPolicy</code>): si alguien formatea el celular con los botones físicos de <i>Recovery</i>, al encender quedará 100% bloqueado de fábrica pidiendo exclusivamente la cuenta de tu empresa.
+                  Introduce el <code>userId</code> de Google permitido por la política FRP (puedes separar varios con coma). Verifica el identificador con el agente FRP del fabricante; no asumas que el <code>id</code> del perfil OAuth es equivalente. FinJoy solo intenta aplicar la política si ya es <i>Device Owner</i> y el dispositivo la admite. FRP puede exigir una cuenta autorizada después de ciertos restablecimientos, pero no impide todos los borrados ni garantiza el bloqueo en cualquier modelo.
                 </p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label htmlFor="frp-accounts" className="text-xs">
-                      ID(s) de cuenta Google FRP de tu negocio
+                      userId(s) de cuenta Google para FRP
                     </Label>
                     <Input
                       id="frp-accounts"
@@ -297,16 +315,16 @@ export default function ApkDistribution() {
                   {savingProtection && (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   )}
-                  Guardar blindaje FRP y sincronizar APKs
+                  Guardar configuración FRP
                 </Button>
               </div>
 
               <div className="space-y-2 rounded-xl border bg-muted/40 p-4">
                 <p className="flex items-center gap-2 font-semibold">
-                  <Terminal className="h-4 w-4 text-primary" /> Instalación por Cable USB (ADB) en teléfono encendido
+                  <Terminal className="h-4 w-4 text-primary" /> ADB para pruebas o enrolamiento compatible
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Instala la APK en el celular, quita temporalmente las cuentas de Google en Ajustes, activa Depuración USB y ejecuta este comando desde la PC:
+                  Este comando intenta asignar FinJoy como Device Owner. Android solo lo permite si el teléfono cumple los requisitos de aprovisionamiento; instalar la APK por USB y conceder Device Admin no es suficiente. Para producción, prepara el equipo y completa el QR en un teléfono nuevo o restablecido.
                 </p>
                 <div className="flex items-center justify-between gap-2 rounded-lg bg-background p-2.5 font-mono text-xs">
                   <span className="truncate">{ADB_DEVICE_OWNER_CMD}</span>
@@ -336,19 +354,19 @@ export default function ApkDistribution() {
                 <>
                   <img
                     src={qrImageUrl}
-                    alt="QR de aprovisionamiento Android Enterprise FinJoy"
+                    alt="Código QR de aprovisionamiento FinJoy"
                     className="h-48 w-48 rounded-lg border bg-white p-2"
                   />
                   <p className="mt-2 text-xs font-medium">
-                    QR Device Owner + FRP · v{current?.version}
+                    QR de aprovisionamiento · v{current?.version}
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    En teléfono nuevo/formateado: toca <b>6 veces</b> en &ldquo;Hola&rdquo; para escanear
+                    En un teléfono nuevo o restablecido compatible, inicia el asistente de aprovisionamiento y escanea el QR.
                   </p>
                 </>
               ) : (
                 <p className="px-4 text-xs text-muted-foreground">
-                  Sube y activa una versión de la APK para generar automáticamente el código QR de aprovisionamiento anti-formateo.
+                  Sube y activa una versión de la APK para generar el QR de aprovisionamiento.
                 </p>
               )}
             </div>
@@ -358,10 +376,10 @@ export default function ApkDistribution() {
             <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
               <div>
                 <p className="font-semibold">
-                  Nivel B: Configuración Google Zero-Touch Enrollment / Samsung Knox Guard (Reinstalación automática por IMEI)
+                  Zero-touch (solo equipos elegibles asignados por un distribuidor autorizado)
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Al registrar el IMEI en tu portal de Google Zero-Touch o Knox Guard, pega este bloque en <b>DPC Extras</b>. Si formatean el equipo por botones físicos, Android descargará FinJoy automáticamente al conectarse a internet, otorgará todos los permisos sin preguntar (<code>PERMISSION_POLICY_AUTO_GRANT</code>) y bloqueará el celular de inmediato.
+                  Este bloque solo contiene extras DPC. No registra el IMEI ni habilita Zero-touch o Knox Guard por sí solo. Zero-touch requiere equipos compatibles asignados por un distribuidor autorizado y una configuración completada en el portal correspondiente. La reinscripción después de un restablecimiento depende de esa configuración y del soporte del fabricante.
                 </p>
               </div>
               <Button

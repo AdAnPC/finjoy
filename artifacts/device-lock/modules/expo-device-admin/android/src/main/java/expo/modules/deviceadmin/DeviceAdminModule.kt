@@ -118,12 +118,21 @@ class DeviceAdminModule : Module() {
     }
   }
 
-  private fun applyFrpPolicy(context: Context, enabled: Boolean) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+  private fun notifyFrpAgent(context: Context) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      context.sendBroadcast(
+        Intent("com.google.android.gms.auth.FRP_CONFIG_CHANGED")
+          .setPackage("com.google.android.gms")
+      )
+    }
+  }
+
+  private fun applyFrpPolicy(context: Context, enabled: Boolean): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
     try {
       val dpm = getDpm(context)
       val pkg = context.packageName
-      if (!dpm.isDeviceOwnerApp(pkg)) return
+      if (!dpm.isDeviceOwnerApp(pkg)) return false
       val component = getComponentName(context)
       val accounts = readPersistentFrpAccounts(context)
 
@@ -133,10 +142,19 @@ class DeviceAdminModule : Module() {
           .setFactoryResetProtectionEnabled(true)
           .build()
         dpm.setFactoryResetProtectionPolicy(component, policy)
-      } else if (!enabled) {
-        dpm.setFactoryResetProtectionPolicy(component, null)
+        notifyFrpAgent(context)
+        return true
       }
+
+      // Remove stale FRP allowlists when protection is disabled or no valid
+      // account IDs are configured; never leave a previous account in force.
+      if (!enabled || accounts.isEmpty()) {
+        dpm.setFactoryResetProtectionPolicy(component, null)
+        notifyFrpAgent(context)
+      }
+      return !enabled
     } catch (_: Throwable) {
+      return false
     }
   }
 
@@ -144,12 +162,12 @@ class DeviceAdminModule : Module() {
    * Permanent anti-tamper, anti-factory-reset & Enterprise FRP protection
    * kept active throughout the entire life of the loan.
    */
-  private fun configurePermanentCreditProtection(context: Context, protected: Boolean) {
+  private fun configurePermanentCreditProtection(context: Context, protected: Boolean): Boolean {
     savePersistentCreditProtection(context, protected)
     try {
       val dpm = getDpm(context)
       val pkg = context.packageName
-      if (!dpm.isDeviceOwnerApp(pkg)) return
+      if (!dpm.isDeviceOwnerApp(pkg)) return false
       val component = getComponentName(context)
 
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && protected) {
@@ -165,15 +183,29 @@ class DeviceAdminModule : Module() {
         dpm.addUserRestriction(component, UserManager.DISALLOW_SAFE_BOOT)
         dpm.addUserRestriction(component, "no_oem_unlock")
         dpm.addUserRestriction(component, UserManager.DISALLOW_ADD_USER)
+        // Keep loan deadlines from being manipulated through Android Settings.
+        // This restriction is available from Android 9 (API 28).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+          dpm.addUserRestriction(component, UserManager.DISALLOW_CONFIG_DATE_TIME)
+        }
+        // On Android 11+ require network-provided automatic time as well.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+          dpm.setAutoTimeEnabled(component, true)
+        }
       } else {
         dpm.clearUserRestriction(component, UserManager.DISALLOW_FACTORY_RESET)
         dpm.clearUserRestriction(component, UserManager.DISALLOW_SAFE_BOOT)
         dpm.clearUserRestriction(component, "no_oem_unlock")
         dpm.clearUserRestriction(component, UserManager.DISALLOW_ADD_USER)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+          dpm.clearUserRestriction(component, UserManager.DISALLOW_CONFIG_DATE_TIME)
+        }
       }
 
-      applyFrpPolicy(context, protected)
+      val frpConfigured = applyFrpPolicy(context, protected)
+      return !protected || frpConfigured
     } catch (_: Throwable) {
+      return false
     }
   }
 
@@ -225,6 +257,14 @@ class DeviceAdminModule : Module() {
       MessageDigest.getInstance("SHA-256")
         .digest(androidId.toByteArray(Charsets.UTF_8))
         .joinToString("") { byte -> "%02x".format(byte) }
+    }
+
+    AsyncFunction("getDeviceInfo") {
+      mapOf(
+        "manufacturer" to Build.MANUFACTURER,
+        "model" to Build.MODEL,
+        "osVersion" to Build.VERSION.RELEASE
+      )
     }
 
     AsyncFunction("requestDeviceAdmin") {
@@ -281,13 +321,11 @@ class DeviceAdminModule : Module() {
       savePersistentFrpAccounts(context, accounts)
       val isProtected = getPrefs(context).getBoolean("credit_protected", true)
       applyFrpPolicy(context, isProtected)
-      true
     }
 
     AsyncFunction("setCreditProtectionEnabled") { protected: Boolean ->
       val context = appContext.reactContext ?: return@AsyncFunction false
       configurePermanentCreditProtection(context, protected)
-      true
     }
 
     AsyncFunction("setKioskLockEnabled") { enabled: Boolean ->

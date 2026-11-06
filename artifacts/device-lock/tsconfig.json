@@ -9,6 +9,9 @@
       ],
       "expo-device-admin": [
         "./modules/expo-device-admin"
+      ],
+      "@workspace/api-client-react": [
+        "../../lib/api-client-react/src/index.ts"
       ]
     }
   },

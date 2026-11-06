@@ -1,16 +1,20 @@
 ---
 name: Local downloads and deployment
-description: User's portability goal and undecided production-hosting destination for FinJoy.
+description: User's portability goal and Railway deployment destination for FinJoy.
 ---
 
-Keep FinJoy usable as a complete project downloaded to the user's PC, with simple local setup and build steps. The user intends to publish it to production themselves later, but has not selected a hosting destination.
+Keep FinJoy usable as a complete project downloaded to the user's PC, with simple local setup and build steps. The user intends to publish it to Railway.
 
 **Why:** The user explicitly asked that the whole project be designed for downloading to their PC and later self-publishing.
 
-**How to apply:** Preserve cross-platform local scripts and clear operational documentation. Do not migrate the database or change the default storage provider before a destination is selected. APK storage may use an optional S3-compatible provider for external hosting while keeping Replit App Storage as the Replit default; document remaining Replit-only dependencies and production blockers.
+**How to apply:** Preserve cross-platform local scripts and clear operational documentation. Store APKs on a persistent Railway Volume using `APK_STORAGE_DIR`; do not add Replit, S3 or GCS storage integrations unless the user changes this direction.
 
-The user also wants the generated APK to run outside Replit. Keep the installed mobile app self-contained; it currently stores data locally and is not synchronized with the admin API.
+The user also wants the generated APK to run outside the hosting service. Keep the installed mobile app self-contained; it currently stores data locally and is not synchronized with the admin API.
 
-**Why:** The user asked for the APK to function outside Replit while leaving the production destination undecided.
+**Why:** The user asked for the APK to function independently and selected Railway for hosting the project services.
 
-**How to apply:** Avoid runtime dependencies on Replit domains in the APK. Do not imply local APK data is synchronized with the production panel or API.
+**How to apply:** Avoid dependencies on hosting-provider domains in the APK. Do not imply local APK data is synchronized with the production panel or API.
+
+The financed phone must still enforce the cached payment deadline while offline. Once the account and active loan have synced, the app recalculates overdue status locally and applies the lock after the configured grace period without requiring an active network connection. Payments and account changes made on the server become visible after the phone reconnects.
+
+**How to apply:** Preserve offline due-date enforcement when changing app synchronization, account caching, or Device Owner policies. Do not claim an offline phone can receive a new remote command or learn about a payment the server has not synchronized.

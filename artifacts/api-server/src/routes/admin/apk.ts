@@ -306,6 +306,10 @@ router.put("/admin/apk/protection-config", async (req, res): Promise<void> => {
           .map((item) => String(item).trim())
           .filter(Boolean)
       : undefined;
+    if (frpAccountIds?.some((accountId) => !/^\d{1,64}$/.test(accountId))) {
+      res.status(400).json({ error: "Los userId de Google FRP deben ser numéricos" });
+      return;
+    }
     const organizationName =
       typeof body?.organizationName === "string"
         ? body.organizationName

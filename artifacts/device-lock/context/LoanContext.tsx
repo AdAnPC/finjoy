@@ -9,7 +9,6 @@ import React, {
   useState,
 } from "react";
 import { AppState } from "react-native";
-import * as Device from "expo-device";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   getGetCustomerAccountQueryKey,
@@ -22,6 +21,7 @@ import {
 import {
   lockDeviceNow,
   getDeviceIdHash,
+  getDeviceInfo,
   isDeviceAdminActive,
   isDeviceOwner,
   setCreditProtectionEnabled,
@@ -258,7 +258,8 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
     if (!deviceIdHash) {
       throw new Error("No se pudo identificar este teléfono Android.");
     }
-    const [deviceAdminActive, deviceOwner] = await Promise.all([
+    const [deviceInfo, deviceAdminActive, deviceOwner] = await Promise.all([
+      getDeviceInfo(),
       isDeviceAdminActive(),
       isDeviceOwner(),
     ]);
@@ -270,9 +271,9 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
       },
       body: JSON.stringify({
         deviceIdHash,
-        manufacturer: Device.brand ?? null,
-        model: Device.modelName ?? Device.modelId ?? "Android",
-        osVersion: Device.osVersion ?? null,
+        manufacturer: deviceInfo?.manufacturer ?? null,
+        model: deviceInfo?.model ?? "Android",
+        osVersion: deviceInfo?.osVersion ?? null,
         deviceAdminActive,
         deviceOwner,
       }),
@@ -411,7 +412,7 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
   )?.protection?.frpAccountIds;
 
   useEffect(() => {
-    if (Array.isArray(frpAccountIds) && frpAccountIds.length > 0) {
+    if (Array.isArray(frpAccountIds)) {
       void setFrpAccounts(frpAccountIds);
     }
   }, [frpAccountIds]);

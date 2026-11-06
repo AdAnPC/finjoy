@@ -4,19 +4,17 @@
   "license": "MIT",
   "scripts": {
     "dev": "node --env-file=.env scripts/dev-local.cjs",
-    "preinstall": "node scripts/preinstall.cjs",
-    "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "dev:local": "node --env-file=.env scripts/dev-local.cjs",
+    "build": "node ./node_modules/vite/bin/vite.js build --config ./artifacts/admin-panel/vite.config.ts && node ./artifacts/api-server/build.mjs",
+    "start": "node --enable-source-maps ./artifacts/api-server/dist/index.mjs",
+    "preinstall": "node scripts/preinstall.cjs",
     "db:push:local": "node --env-file=.env scripts/push-db-local.cjs",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
   "private": true,
-  "dependencies": {
-    "@replit/connectors-sdk": "^0.4.1"
-  },
   "devDependencies": {
-    "prettier": "^3.9.6",
+    "prettier": "^3.9.10",
     "typescript": "~5.9.3"
   }
 }

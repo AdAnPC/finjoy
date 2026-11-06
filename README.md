@@ -42,13 +42,15 @@ Necesitas PostgreSQL de desarrollo, Node.js y conexión a internet para descarga
 
    Abre `http://localhost:5173`. El panel usa un proxy de desarrollo hacia el API local en el puerto 8080.
 
-La APK que genera el asistente es autónoma: queda instalada en el teléfono y no necesita Replit para abrir ni usar sus funciones actuales. La app guarda sus datos localmente; todavía no sincroniza créditos o pagos con la API.
+La APK que genera el asistente es autónoma: queda instalada en el teléfono y no necesita un servicio de desarrollo externo para abrir. La app guarda sus datos localmente; todavía no sincroniza créditos o pagos con la API.
 
-Para usar la subida y descarga de APKs del panel fuera de Replit, configura un almacenamiento compatible con S3 en el API. La guía [`docs/PRODUCCION.md`](docs/PRODUCCION.md) explica las variables necesarias. El almacenamiento predeterminado en Replit sigue siendo App Storage.
+La subida de APK se guarda en el sistema de archivos del API. En producción, monta almacenamiento persistente (por ejemplo, un Volume de Railway) y configura `APK_STORAGE_DIR` a su ruta de montaje. La guía [`docs/PRODUCCION.md`](docs/PRODUCCION.md) explica los componentes.
 
 ## Preparación para producción
 
-Consulta [`docs/PRODUCCION.md`](docs/PRODUCCION.md) antes de desplegar. El destino aún no está fijado; el proyecto mantiene PostgreSQL y App Storage como opciones actuales, y permite configurar almacenamiento APK compatible con S3 sin credenciales guardadas en el repositorio.
+Consulta [`docs/PRODUCCION.md`](docs/PRODUCCION.md) antes de desplegar. El panel genera los QR localmente y el API guarda los APK en disco persistente. PostgreSQL y el hosting deben configurarse para tu despliegue.
+
+Para aprovisionar por USB y configurar Device Owner, sigue [`docs/INSTALACION_USB_DEVICE_OWNER.md`](docs/INSTALACION_USB_DEVICE_OWNER.md).
 
 **No publiques el panel/API tal como están:** falta autenticación administrativa y la app móvil conserva el estado de crédito localmente. El checklist explica estos bloqueos y los pasos que deben completarse.
 

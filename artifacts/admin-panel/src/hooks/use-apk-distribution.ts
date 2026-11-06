@@ -67,6 +67,9 @@ export function useApkDistribution() {
         .split(",")
         .map((item) => item.trim())
         .filter(Boolean);
+      if (parsedIds.some((id) => !/^\d{1,64}$/.test(id))) {
+        throw new Error("Usa solo userId numéricos de Google, separados por comas.");
+      }
       const response = await fetch(`${APK_API_BASE}/protection-config`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -83,9 +86,9 @@ export function useApkDistribution() {
       setFrpInput(saved.frpAccountIds.join(", "));
       setOrganizationName(saved.organizationName);
       toast({
-        title: "Blindaje FRP / Zero-Touch actualizado",
+        title: "Configuración FRP guardada",
         description:
-          "El código QR, el JSON de Zero-Touch y las APKs conectadas ya usan esta configuración.",
+          "La app y el QR de aprovisionamiento pueden consultar esta configuración. Android solo la aplica en dispositivos enrolados y compatibles.",
       });
     } catch (error) {
       toast({

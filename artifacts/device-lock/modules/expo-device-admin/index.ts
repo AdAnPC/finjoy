@@ -27,9 +27,7 @@ export async function isDeviceAdminActive(): Promise<boolean> {
   }
 }
 
-/**
- * Returns true if the app is provisioned as Android Device Owner (full anti-factory-reset mode).
- */
+/** Returns true only when Android has provisioned this app as Device Owner. */
 export async function isDeviceOwner(): Promise<boolean> {
   if (!isSupported || !ExpoDeviceAdmin) return false;
   try {
@@ -45,6 +43,28 @@ export async function getDeviceIdHash(): Promise<string | null> {
   try {
     const value = await ExpoDeviceAdmin.getDeviceIdHash();
     return typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export type FinJoyDeviceInfo = {
+  manufacturer: string | null;
+  model: string | null;
+  osVersion: string | null;
+};
+
+/** Returns basic Android hardware details for device enrollment records. */
+export async function getDeviceInfo(): Promise<FinJoyDeviceInfo | null> {
+  if (!isSupported || !ExpoDeviceAdmin) return null;
+  try {
+    const value = await ExpoDeviceAdmin.getDeviceInfo();
+    if (!value || typeof value !== 'object') return null;
+    return {
+      manufacturer: typeof value.manufacturer === 'string' ? value.manufacturer : null,
+      model: typeof value.model === 'string' ? value.model : null,
+      osVersion: typeof value.osVersion === 'string' ? value.osVersion : null,
+    };
   } catch {
     return null;
   }
@@ -99,9 +119,9 @@ export async function lockDeviceNow(): Promise<boolean> {
 }
 
 /**
- * Configures Enterprise Factory Reset Protection (FRP) Google Account IDs on the device (Android 11+ / API 30+).
- * If someone forces a hardware factory reset from Recovery Mode, the phone will be locked on boot
- * requiring one of these business Google accounts.
+ * Requests the enterprise FRP policy using Google account user IDs (Android 11+).
+ * Requires Device Owner, a supported device/FRP agent, and valid account IDs.
+ * FRP does not prevent every reset or guarantee behavior across all OEMs.
  */
 export async function setFrpAccounts(accounts: string[]): Promise<boolean> {
   if (!isSupported || !ExpoDeviceAdmin) return false;
@@ -113,9 +133,9 @@ export async function setFrpAccounts(accounts: string[]): Promise<boolean> {
 }
 
 /**
- * Enables or disables permanent anti-factory-reset (DISALLOW_FACTORY_RESET),
- * Enterprise FRP, anti-safe-boot (DISALLOW_SAFE_BOOT), anti-OEM-unlock, and
- * anti-uninstall policies while the device has an active unpaid loan.
+ * Requests Device Owner restrictions for factory reset from Settings, safe boot,
+ * adding users, OEM unlock, and uninstalling FinJoy. Device/OEM support varies;
+ * these restrictions cannot prevent every physical reset or firmware rewrite.
  */
 export async function setCreditProtectionEnabled(protectedState: boolean): Promise<boolean> {
   if (!isSupported || !ExpoDeviceAdmin) return false;

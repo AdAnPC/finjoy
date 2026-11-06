@@ -1,7 +1,7 @@
 const configuredUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
-const replitDomain = process.env.EXPO_PUBLIC_DOMAIN?.trim();
+const publicDomain = process.env.EXPO_PUBLIC_DOMAIN?.trim();
 const candidateUrl =
-  configuredUrl || (replitDomain ? `https://${replitDomain}` : "");
+  configuredUrl || (publicDomain ? `https://${publicDomain}` : "");
 
 let normalizedBaseUrl: string | null = null;
 if (candidateUrl) {

@@ -4,18 +4,6 @@ const path = require("node:path");
 const appRoot = path.resolve(__dirname, "..");
 const env = { ...process.env };
 
-if (env.REPLIT_EXPO_DEV_DOMAIN) {
-  env.EXPO_PACKAGER_PROXY_URL = `https://${env.REPLIT_EXPO_DEV_DOMAIN}`;
-  env.REACT_NATIVE_PACKAGER_HOSTNAME =
-    env.REPLIT_DEV_DOMAIN || env.REACT_NATIVE_PACKAGER_HOSTNAME;
-}
-if (env.REPLIT_DEV_DOMAIN) {
-  env.EXPO_PUBLIC_DOMAIN = env.REPLIT_DEV_DOMAIN;
-}
-if (env.REPL_ID) {
-  env.EXPO_PUBLIC_REPL_ID = env.REPL_ID;
-}
-
 const port = env.PORT || "8081";
 const child = spawn(
   "pnpm",
