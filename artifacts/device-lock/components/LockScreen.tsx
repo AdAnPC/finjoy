@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { lockDeviceNow, setKioskLockEnabled } from 'expo-device-admin';
+import { setKioskLockEnabled } from 'expo-device-admin';
 import { PaymentModal } from '@/components/PaymentModal';
 import { useLoan } from '@/context/LoanContext';
 import { useSafeAreaPadding } from '@/hooks/useSafeAreaPadding';
@@ -38,10 +38,7 @@ export function LockScreen({ visible }: Props) {
       () => true,
     );
     const appStateSubscription = AppState.addEventListener('change', (state) => {
-      if (state === 'background') {
-        void setKioskLockEnabled(true);
-        void lockDeviceNow();
-      } else if (state === 'active') {
+      if (state === 'active') {
         void setKioskLockEnabled(true);
         void refreshAccount();
       }

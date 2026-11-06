@@ -1,6 +1,7 @@
 package expo.modules.deviceadmin
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.admin.DevicePolicyManager
 import android.app.admin.FactoryResetProtectionPolicy
 import android.content.ComponentName
@@ -10,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.UserManager
 import android.provider.Settings
 import java.security.MessageDigest
@@ -21,23 +23,51 @@ import expo.modules.kotlin.modules.ModuleDefinition
 class DeviceAdminModule : Module() {
   private val mainHandler = Handler(Looper.getMainLooper())
   @Volatile private var isKioskLocked = false
+  @Volatile private var lastAppliedPolicyState: Boolean? = null
+
+  private fun isScreenInteractive(context: Context): Boolean {
+    return try {
+      val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+      pm.isInteractive
+    } catch (_: Throwable) {
+      true
+    }
+  }
+
+  private fun isInLockTaskMode(context: Context): Boolean {
+    return try {
+      val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        am.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
+      } else {
+        @Suppress("DEPRECATION")
+        am.isInLockTaskMode
+      }
+    } catch (_: Throwable) {
+      false
+    }
+  }
 
   private val watchdogRunnable = object : Runnable {
     override fun run() {
       if (!isKioskLocked) return
       try {
         val context = appContext.reactContext
-        val activity = appContext.currentActivity
-        if (activity != null) {
-          applyImmersiveLockFlags(activity)
-        }
-        if (context != null && (activity == null || !activity.hasWindowFocus())) {
-          bringAppToFront(context)
+        if (context != null && isScreenInteractive(context)) {
+          val activity = appContext.currentActivity
+          if (activity == null || !activity.hasWindowFocus()) {
+            bringAppToFront(context)
+          } else if (!isInLockTaskMode(context)) {
+            try {
+              activity.startLockTask()
+            } catch (_: Throwable) {
+            }
+          }
         }
       } catch (_: Throwable) {
       } finally {
         if (isKioskLocked) {
-          mainHandler.postDelayed(this, 350L)
+          mainHandler.postDelayed(this, 2000L)
         }
       }
     }
@@ -73,14 +103,14 @@ class DeviceAdminModule : Module() {
   }
 
   private fun bringAppToFront(context: Context) {
+    if (!isScreenInteractive(context)) return
     try {
       val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
       if (launchIntent != null) {
         launchIntent.addFlags(
           Intent.FLAG_ACTIVITY_NEW_TASK or
             Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-            Intent.FLAG_ACTIVITY_SINGLE_TOP or
-            Intent.FLAG_ACTIVITY_CLEAR_TOP
+            Intent.FLAG_ACTIVITY_SINGLE_TOP
         )
         context.startActivity(launchIntent)
       }
@@ -91,12 +121,7 @@ class DeviceAdminModule : Module() {
   @Suppress("DEPRECATION")
   private fun applyImmersiveLockFlags(activity: Activity) {
     try {
-      activity.window.addFlags(
-        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-          WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-          WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-          WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-      )
+      activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
       activity.window.decorView.systemUiVisibility = (
         View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
           View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
@@ -146,8 +171,6 @@ class DeviceAdminModule : Module() {
         return true
       }
 
-      // Remove stale FRP allowlists when protection is disabled or no valid
-      // account IDs are configured; never leave a previous account in force.
       if (!enabled || accounts.isEmpty()) {
         dpm.setFactoryResetProtectionPolicy(component, null)
         notifyFrpAgent(context)
@@ -183,12 +206,9 @@ class DeviceAdminModule : Module() {
         dpm.addUserRestriction(component, UserManager.DISALLOW_SAFE_BOOT)
         dpm.addUserRestriction(component, "no_oem_unlock")
         dpm.addUserRestriction(component, UserManager.DISALLOW_ADD_USER)
-        // Keep loan deadlines from being manipulated through Android Settings.
-        // This restriction is available from Android 9 (API 28).
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
           dpm.addUserRestriction(component, UserManager.DISALLOW_CONFIG_DATE_TIME)
         }
-        // On Android 11+ require network-provided automatic time as well.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
           dpm.setAutoTimeEnabled(component, true)
         }
@@ -210,6 +230,8 @@ class DeviceAdminModule : Module() {
   }
 
   private fun configureKioskDeviceOwnerPolicies(context: Context, locked: Boolean) {
+    if (lastAppliedPolicyState == locked) return
+    lastAppliedPolicyState = locked
     try {
       val dpm = getDpm(context)
       val pkg = context.packageName
@@ -308,11 +330,8 @@ class DeviceAdminModule : Module() {
     }
 
     AsyncFunction("lockNow") {
-      val context = appContext.reactContext ?: return@AsyncFunction false
-      val dpm = getDpm(context)
-      val component = getComponentName(context)
-      if (!dpm.isAdminActive(component)) return@AsyncFunction false
-      dpm.lockNow()
+      // Never call dpm.lockNow() during kiosk lock as turning off the screen
+      // triggers background/foreground oscillation. Kiosk lock keeps FinJoy UI in front.
       true
     }
 
@@ -354,31 +373,43 @@ class DeviceAdminModule : Module() {
 
     AsyncFunction("setKioskLockEnabled") { enabled: Boolean ->
       val context = appContext.reactContext ?: return@AsyncFunction false
+      val stateChanged = isKioskLocked != enabled
       isKioskLocked = enabled
       savePersistentLockState(context, enabled)
 
       mainHandler.post {
-        mainHandler.removeCallbacks(watchdogRunnable)
         configureKioskDeviceOwnerPolicies(context, enabled)
         val activity = appContext.currentActivity
         if (enabled) {
           if (activity != null) {
-            applyImmersiveLockFlags(activity)
-            try {
-              activity.startLockTask()
-            } catch (_: Throwable) {
+            if (stateChanged) {
+              applyImmersiveLockFlags(activity)
             }
-          } else {
+            if (!isInLockTaskMode(context)) {
+              try {
+                activity.startLockTask()
+              } catch (_: Throwable) {
+              }
+            }
+          } else if (stateChanged) {
             bringAppToFront(context)
           }
-          mainHandler.postDelayed(watchdogRunnable, 350L)
+          if (stateChanged) {
+            mainHandler.removeCallbacks(watchdogRunnable)
+            mainHandler.postDelayed(watchdogRunnable, 2000L)
+          }
         } else {
+          mainHandler.removeCallbacks(watchdogRunnable)
           if (activity != null) {
-            try {
-              activity.stopLockTask()
-            } catch (_: Throwable) {
+            if (isInLockTaskMode(context)) {
+              try {
+                activity.stopLockTask()
+              } catch (_: Throwable) {
+              }
             }
-            clearImmersiveLockFlags(activity)
+            if (stateChanged) {
+              clearImmersiveLockFlags(activity)
+            }
           }
         }
       }

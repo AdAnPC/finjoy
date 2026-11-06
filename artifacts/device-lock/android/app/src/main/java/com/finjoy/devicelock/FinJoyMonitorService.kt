@@ -20,6 +20,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import org.json.JSONObject
 import java.io.OutputStreamWriter
@@ -50,6 +51,7 @@ class FinJoyMonitorService : Service() {
   private val executor = Executors.newSingleThreadExecutor()
   @Volatile private var latestLocation: Location? = null
   @Volatile private var lastSyncedLockedState: Boolean? = null
+  @Volatile private var appliedPolicyLockState: Boolean? = null
   private var tickCount = 0
 
   private val locationListener = object : LocationListener {
@@ -68,7 +70,7 @@ class FinJoyMonitorService : Service() {
         val prefs = getSharedPreferences("finjoy_lock_prefs", Context.MODE_PRIVATE)
         val isLocked = prefs.getBoolean("is_locked", false)
         if (isLocked) {
-          enforceImmediateLockdown(true)
+          ensureLockedForegroundIfInteractive()
         }
         executor.execute {
           pollServerAndSyncLocation()
@@ -103,6 +105,15 @@ class FinJoyMonitorService : Service() {
   }
 
   override fun onBind(intent: Intent?): IBinder? = null
+
+  private fun isScreenInteractive(): Boolean {
+    return try {
+      val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+      pm.isInteractive
+    } catch (_: Throwable) {
+      true
+    }
+  }
 
   private fun startForegroundNotification() {
     try {
@@ -300,7 +311,6 @@ class FinJoyMonitorService : Service() {
           val isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
             (app.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
           val isSelf = app.packageName == packageName
-          // Suspend non-system apps plus common browsers/Settings/YouTube if locked
           !isSelf && (!isSystem ||
             app.packageName == "com.android.chrome" ||
             app.packageName == "com.google.android.youtube" ||
@@ -317,13 +327,38 @@ class FinJoyMonitorService : Service() {
     }
   }
 
+  private fun ensureLockedForegroundIfInteractive() {
+    try {
+      if (appliedPolicyLockState != true) {
+        enforceImmediateLockdown(true)
+        return
+      }
+      if (!isScreenInteractive()) return
+      val activity = MainActivity.currentInstance
+      if (activity == null || !activity.hasWindowFocus()) {
+        val launchIntent = Intent(this, MainActivity::class.java).apply {
+          addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+              Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+              Intent.FLAG_ACTIVITY_SINGLE_TOP
+          )
+        }
+        startActivity(launchIntent)
+      } else {
+        activity.engageKioskLock()
+      }
+    } catch (_: Throwable) {
+    }
+  }
+
   private fun enforceImmediateLockdown(locked: Boolean) {
     try {
       val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
       val component = ComponentName(packageName, "$packageName.FinJoyDeviceAdminReceiver")
       val isOwner = dpm.isDeviceOwnerApp(packageName)
 
-      if (isOwner) {
+      if (isOwner && appliedPolicyLockState != locked) {
+        appliedPolicyLockState = locked
         dpm.setLockTaskPackages(component, if (locked) arrayOf(packageName) else emptyArray())
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
           dpm.setLockTaskFeatures(
@@ -338,13 +373,12 @@ class FinJoyMonitorService : Service() {
 
       val activity = MainActivity.currentInstance
       if (locked) {
-        if (activity == null || !activity.hasWindowFocus()) {
+        if (isScreenInteractive() && (activity == null || !activity.hasWindowFocus())) {
           val launchIntent = Intent(this, MainActivity::class.java).apply {
             addFlags(
               Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                Intent.FLAG_ACTIVITY_CLEAR_TOP
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
             )
           }
           startActivity(launchIntent)

@@ -463,9 +463,6 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void setKioskLockEnabled(shouldEnforceKiosk);
-    if (isDeviceLocked && !wasLockedRef.current) {
-      void lockDeviceNow();
-    }
     wasLockedRef.current = isDeviceLocked;
   }, [isDeviceLocked, shouldEnforceKiosk]);
 
