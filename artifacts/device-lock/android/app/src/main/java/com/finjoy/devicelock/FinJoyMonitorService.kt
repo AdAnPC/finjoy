@@ -71,6 +71,8 @@ class FinJoyMonitorService : Service() {
         val isLocked = prefs.getBoolean("is_locked", false)
         if (isLocked) {
           ensureLockedForegroundIfInteractive()
+        } else if (appliedPolicyLockState == true) {
+          enforceImmediateLockdown(false)
         }
         executor.execute {
           pollServerAndSyncLocation()
@@ -335,7 +337,7 @@ class FinJoyMonitorService : Service() {
       }
       if (!isScreenInteractive()) return
       val activity = MainActivity.currentInstance
-      if (activity == null || !activity.hasWindowFocus()) {
+      if (activity == null || !MainActivity.isActivityVisible) {
         val launchIntent = Intent(this, MainActivity::class.java).apply {
           addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -373,7 +375,7 @@ class FinJoyMonitorService : Service() {
 
       val activity = MainActivity.currentInstance
       if (locked) {
-        if (isScreenInteractive() && (activity == null || !activity.hasWindowFocus())) {
+        if (isScreenInteractive() && (activity == null || !MainActivity.isActivityVisible)) {
           val launchIntent = Intent(this, MainActivity::class.java).apply {
             addFlags(
               Intent.FLAG_ACTIVITY_NEW_TASK or

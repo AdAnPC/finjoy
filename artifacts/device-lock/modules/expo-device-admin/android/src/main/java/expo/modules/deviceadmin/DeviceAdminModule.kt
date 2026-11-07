@@ -7,6 +7,7 @@ import android.app.admin.FactoryResetProtectionPolicy
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -55,7 +56,7 @@ class DeviceAdminModule : Module() {
         val context = appContext.reactContext
         if (context != null && isScreenInteractive(context)) {
           val activity = appContext.currentActivity
-          if (activity == null || !activity.hasWindowFocus()) {
+          if (activity == null) {
             bringAppToFront(context)
           } else if (!isInLockTaskMode(context)) {
             try {
@@ -181,10 +182,6 @@ class DeviceAdminModule : Module() {
     }
   }
 
-  /**
-   * Permanent anti-tamper, anti-factory-reset & Enterprise FRP protection
-   * kept active throughout the entire life of the loan.
-   */
   private fun configurePermanentCreditProtection(context: Context, protected: Boolean): Boolean {
     savePersistentCreditProtection(context, protected)
     try {
@@ -229,6 +226,37 @@ class DeviceAdminModule : Module() {
     }
   }
 
+  private fun suspendOrUnsuspendUserApps(
+    context: Context,
+    dpm: DevicePolicyManager,
+    component: ComponentName,
+    suspend: Boolean
+  ) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+    try {
+      val pm = context.packageManager
+      val installed = pm.getInstalledApplications(0)
+      val targets = installed
+        .filter { app ->
+          val isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+            (app.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+          val isSelf = app.packageName == context.packageName
+          !isSelf && (!isSystem ||
+            app.packageName == "com.android.chrome" ||
+            app.packageName == "com.google.android.youtube" ||
+            app.packageName == "com.android.vending" ||
+            app.packageName == "com.miui.securitycenter")
+        }
+        .map { it.packageName }
+        .toTypedArray()
+
+      if (targets.isNotEmpty()) {
+        dpm.setPackagesSuspended(component, targets, suspend)
+      }
+    } catch (_: Throwable) {
+    }
+  }
+
   private fun configureKioskDeviceOwnerPolicies(context: Context, locked: Boolean) {
     if (lastAppliedPolicyState == locked) return
     lastAppliedPolicyState = locked
@@ -251,6 +279,7 @@ class DeviceAdminModule : Module() {
         )
       }
       dpm.setStatusBarDisabled(component, locked)
+      suspendOrUnsuspendUserApps(context, dpm, component, locked)
     } catch (_: Throwable) {
     }
   }
@@ -330,8 +359,6 @@ class DeviceAdminModule : Module() {
     }
 
     AsyncFunction("lockNow") {
-      // Never call dpm.lockNow() during kiosk lock as turning off the screen
-      // triggers background/foreground oscillation. Kiosk lock keeps FinJoy UI in front.
       true
     }
 

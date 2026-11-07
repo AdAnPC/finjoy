@@ -20,6 +20,9 @@ class MainActivity : ReactActivity() {
   companion object {
     @Volatile
     var currentInstance: MainActivity? = null
+
+    @Volatile
+    var isActivityVisible: Boolean = false
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,9 +41,16 @@ class MainActivity : ReactActivity() {
     }
   }
 
+  override fun onStart() {
+    super.onStart()
+    currentInstance = this
+    isActivityVisible = true
+  }
+
   override fun onResume() {
     super.onResume()
     currentInstance = this
+    isActivityVisible = true
     try {
       FinJoyMonitorService.start(this)
       val prefs = getSharedPreferences("finjoy_lock_prefs", Context.MODE_PRIVATE)
@@ -51,9 +61,15 @@ class MainActivity : ReactActivity() {
     }
   }
 
+  override fun onStop() {
+    isActivityVisible = false
+    super.onStop()
+  }
+
   override fun onDestroy() {
     if (currentInstance === this) {
       currentInstance = null
+      isActivityVisible = false
     }
     super.onDestroy()
   }
