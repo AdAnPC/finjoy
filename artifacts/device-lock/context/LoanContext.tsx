@@ -218,7 +218,7 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!API_IS_CONFIGURED) return;
+    if (!API_IS_CONFIGURED || !API_BASE_URL) return;
     void configureBackgroundSync(API_BASE_URL, sessionToken);
   }, [sessionToken]);
 
@@ -253,7 +253,9 @@ export function LoanProvider({ children }: { children: React.ReactNode }) {
     async (token: string) => {
       await SecureStore.setItemAsync(SESSION_KEY, token);
       setSessionToken(token);
-      void configureBackgroundSync(API_BASE_URL, token);
+      if (API_BASE_URL) {
+        void configureBackgroundSync(API_BASE_URL, token);
+      }
       await queryClient.invalidateQueries();
     },
     [queryClient],

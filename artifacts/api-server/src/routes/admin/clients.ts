@@ -122,7 +122,7 @@ router.get("/admin/clients", async (req, res): Promise<void> => {
 
   const parsed = ListClientsResponse.parse(filtered);
   res.json(
-    parsed.map((item) => {
+    parsed.map((item: (typeof filtered)[number]) => {
       const device = deviceByClientId.get(item.id);
       return {
         ...item,

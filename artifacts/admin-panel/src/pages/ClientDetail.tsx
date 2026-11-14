@@ -18,6 +18,7 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  getGetClientQueryKey,
   useDeleteClient,
   useGetClient,
   useIssueClientActivationCode,
@@ -52,7 +53,7 @@ export default function ClientDetail() {
   const id = Number(params?.id);
   const queryClient = useQueryClient();
   const { data: client, isLoading } = useGetClient(id, {
-    query: { refetchInterval: 4000 },
+    query: { queryKey: getGetClientQueryKey(id), refetchInterval: 4000 },
   });
   const remove = useDeleteClient();
   const issueActivationCode = useIssueClientActivationCode();

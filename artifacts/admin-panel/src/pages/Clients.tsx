@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { Link } from "wouter";
-import { useListClients, ListClientsStatus } from "@workspace/api-client-react";
+import {
+  getListClientsQueryKey,
+  useListClients,
+  ListClientsStatus,
+} from "@workspace/api-client-react";
 import {
   Table,
   TableBody,
@@ -49,15 +53,16 @@ export default function Clients() {
   const debouncedSearch = useDebounce(search, 300);
   const [status, setStatus] = useState<ListClientsStatus | "all">("all");
 
-  const { data: clients, isLoading } = useListClients(
-    {
-      search: debouncedSearch || undefined,
-      status: status === "all" ? undefined : status,
+  const queryParams = {
+    search: debouncedSearch || undefined,
+    status: status === "all" ? undefined : status,
+  };
+  const { data: clients, isLoading } = useListClients(queryParams, {
+    query: {
+      queryKey: getListClientsQueryKey(queryParams),
+      refetchInterval: 5000,
     },
-    {
-      query: { refetchInterval: 5000 },
-    },
-  );
+  });
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
