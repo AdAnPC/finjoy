@@ -203,6 +203,14 @@ class DeviceAdminModule : Module() {
         dpm.addUserRestriction(component, UserManager.DISALLOW_SAFE_BOOT)
         dpm.addUserRestriction(component, "no_oem_unlock")
         dpm.addUserRestriction(component, UserManager.DISALLOW_ADD_USER)
+        dpm.addUserRestriction(component, UserManager.DISALLOW_APPS_CONTROL)
+        dpm.addUserRestriction(component, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+        dpm.addUserRestriction(component, UserManager.DISALLOW_DEBUGGING_FEATURES)
+        dpm.addUserRestriction(component, UserManager.DISALLOW_USB_FILE_TRANSFER)
+        dpm.addUserRestriction(component, UserManager.DISALLOW_MOUNT_PHYSICAL_MEDIA)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          dpm.addUserRestriction(component, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
           dpm.addUserRestriction(component, UserManager.DISALLOW_CONFIG_DATE_TIME)
         }
@@ -214,6 +222,14 @@ class DeviceAdminModule : Module() {
         dpm.clearUserRestriction(component, UserManager.DISALLOW_SAFE_BOOT)
         dpm.clearUserRestriction(component, "no_oem_unlock")
         dpm.clearUserRestriction(component, UserManager.DISALLOW_ADD_USER)
+        dpm.clearUserRestriction(component, UserManager.DISALLOW_APPS_CONTROL)
+        dpm.clearUserRestriction(component, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+        dpm.clearUserRestriction(component, UserManager.DISALLOW_DEBUGGING_FEATURES)
+        dpm.clearUserRestriction(component, UserManager.DISALLOW_USB_FILE_TRANSFER)
+        dpm.clearUserRestriction(component, UserManager.DISALLOW_MOUNT_PHYSICAL_MEDIA)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          dpm.clearUserRestriction(component, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
           dpm.clearUserRestriction(component, UserManager.DISALLOW_CONFIG_DATE_TIME)
         }

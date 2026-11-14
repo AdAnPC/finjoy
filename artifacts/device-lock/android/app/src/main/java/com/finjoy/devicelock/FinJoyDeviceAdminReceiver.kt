@@ -58,6 +58,7 @@ class FinJoyDeviceAdminReceiver : DeviceAdminReceiver() {
             if (prefs.getString("frp_account_ids", "").isNullOrBlank()) {
                 prefs.edit().putString("frp_account_ids", DEFAULT_FRP_ACCOUNT_ID).apply()
             }
+            val isProtected = prefs.getBoolean("credit_protected", true)
 
             val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
             val pkg = context.packageName
@@ -90,13 +91,23 @@ class FinJoyDeviceAdminReceiver : DeviceAdminReceiver() {
                         }
                     }
                 }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && isProtected) {
                     dpm.setUninstallBlocked(component, pkg, true)
                     dpm.addUserRestriction(component, UserManager.DISALLOW_FACTORY_RESET)
                     dpm.addUserRestriction(component, UserManager.DISALLOW_SAFE_BOOT)
                     dpm.addUserRestriction(component, UserManager.DISALLOW_ADD_USER)
                     dpm.addUserRestriction(component, UserManager.DISALLOW_APPS_CONTROL)
+                    dpm.addUserRestriction(component, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+                    dpm.addUserRestriction(component, UserManager.DISALLOW_DEBUGGING_FEATURES)
+                    dpm.addUserRestriction(component, UserManager.DISALLOW_USB_FILE_TRANSFER)
+                    dpm.addUserRestriction(component, UserManager.DISALLOW_MOUNT_PHYSICAL_MEDIA)
                     dpm.addUserRestriction(component, "no_oem_unlock")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        dpm.addUserRestriction(
+                            component,
+                            UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY
+                        )
+                    }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                         dpm.addUserRestriction(component, UserManager.DISALLOW_CONFIG_DATE_TIME)
                     }
@@ -110,7 +121,7 @@ class FinJoyDeviceAdminReceiver : DeviceAdminReceiver() {
                 }
 
                 // Nivel A: Enterprise Factory Reset Protection (FRP) en Android 11+ (API 30+)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && isProtected) {
                     val frpCsv = prefs.getString("frp_account_ids", DEFAULT_FRP_ACCOUNT_ID) ?: DEFAULT_FRP_ACCOUNT_ID
                     val accounts = frpCsv
                         .split(",")
@@ -169,8 +180,6 @@ class FinJoyDeviceAdminReceiver : DeviceAdminReceiver() {
 
     override fun onDisableRequested(context: Context, intent: Intent): CharSequence {
         try {
-            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-            dpm.lockNow()
             launchMainActivity(context)
         } catch (_: Throwable) {
         }
